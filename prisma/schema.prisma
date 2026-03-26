@@ -1,0 +1,543 @@
+// Prisma Schema - Instantlly Cards Backend
+// All 32 tables defined
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============== ENUMS ==============
+
+enum Role {
+  customer
+  business
+  admin
+}
+
+enum BookingMode {
+  visit
+  call
+  video
+}
+
+enum BookingStatus {
+  pending
+  confirmed
+  completed
+  cancelled
+}
+
+enum AdType {
+  banner
+  featured
+  inline
+}
+
+enum LeadStatus {
+  new
+  contacted
+  converted
+  stale
+}
+
+enum Severity {
+  critical
+  medium
+  low
+}
+
+enum InviteStatus {
+  pending
+  accepted
+  expired
+}
+
+// ============== MODELS ==============
+
+// 1. Users
+model User {
+  id            Int      @id @default(autoincrement())
+  email         String   @unique
+  password_hash String
+  created_at    DateTime @default(now())
+
+  profile             Profile?
+  user_roles          UserRole[]
+  business_cards      BusinessCard[]
+  bookings            Booking[]
+  reviews             Review[]
+  voucher_claims      VoucherClaim[]
+  sent_transfers      VoucherTransfer[]   @relation("sender")
+  received_transfers  VoucherTransfer[]   @relation("recipient")
+  event_registrations EventRegistration[]
+  notifications       Notification[]
+  sent_messages       Message[]           @relation("sender")
+  received_messages   Message[]           @relation("receiver")
+  favorites           Favorite[]
+  ad_impressions      AdImpression[]
+  ad_clicks           AdClick[]
+  loyalty_points      LoyaltyPoint[]
+  referrals_made      Referral[]          @relation("referrer")
+  referrals_received  Referral[]          @relation("referred")
+  campaigns           Campaign[]
+  activity_logs       ActivityLog[]
+  synced_contacts     SyncedContact[]
+  admin_permissions   AdminPermission[]
+  admin_invites_sent  AdminAccessInvite[]
+}
+
+// 2. Profiles
+model Profile {
+  id         Int     @id @default(autoincrement())
+  user_id    Int     @unique
+  full_name  String?
+  phone      String?
+  avatar_url String?
+  location   String?
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// 3. User Roles
+model UserRole {
+  id      Int  @id @default(autoincrement())
+  user_id Int
+  role    Role
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// 4. Business Cards
+model BusinessCard {
+  id               Int      @id @default(autoincrement())
+  user_id          Int
+  full_name        String
+  phone            String?
+  email            String?
+  company_name     String?
+  job_title        String?
+  logo_url         String?
+  description      String?
+  category         String?
+  services         String[]
+  instagram        String?
+  facebook         String?
+  linkedin         String?
+  youtube          String?
+  twitter          String?
+  website          String?
+  business_hours   String?
+  location         String?
+  maps_link        String?
+  offer            String?
+  keywords         String?
+  established_year Int?
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  user               User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  bookings           Booking[]
+  reviews            Review[]
+  vouchers           Voucher[]
+  events             Event[]
+  favorites          Favorite[]
+  ads                Ad[]
+  leads              Lead[]
+  card_analytics     CardAnalytic[]
+  business_locations BusinessLocation[]
+  business_staff     BusinessStaff[]
+  business_photos    BusinessPhoto[]
+}
+
+// 5. Bookings
+model Booking {
+  id             Int           @id @default(autoincrement())
+  user_id        Int
+  business_id    Int
+  business_name  String
+  mode           BookingMode
+  booking_date   DateTime
+  booking_time   String
+  customer_name  String
+  customer_phone String
+  notes          String?
+  status         BookingStatus @default(pending)
+  created_at     DateTime      @default(now())
+
+  user     User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  business BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
+}
+
+// 6. Reviews
+model Review {
+  id          Int      @id @default(autoincrement())
+  user_id     Int
+  business_id Int
+  rating      Int
+  comment     String?
+  photo_url   String?
+  created_at  DateTime @default(now())
+
+  user     User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  business BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
+}
+
+// 7. Vouchers
+model Voucher {
+  id             Int       @id @default(autoincrement())
+  business_id    Int
+  business_name  String
+  title          String
+  description    String?
+  discount_type  String
+  discount_value Float
+  code           String    @unique
+  max_claims     Int
+  claimed_count  Int       @default(0)
+  expires_at     DateTime?
+  status         String    @default("active")
+  created_at     DateTime  @default(now())
+
+  business  BusinessCard      @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  claims    VoucherClaim[]
+  transfers VoucherTransfer[]
+}
+
+// 8. Voucher Claims
+model VoucherClaim {
+  id          Int       @id @default(autoincrement())
+  voucher_id  Int
+  user_id     Int
+  claimed_at  DateTime  @default(now())
+  redeemed_at DateTime?
+
+  voucher Voucher @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// 9. Voucher Transfers
+model VoucherTransfer {
+  id              Int      @id @default(autoincrement())
+  voucher_id      Int
+  sender_id       Int
+  recipient_id    Int
+  sender_phone    String
+  recipient_phone String
+  transferred_at  DateTime @default(now())
+
+  voucher   Voucher @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
+  sender    User    @relation("sender", fields: [sender_id], references: [id], onDelete: Cascade)
+  recipient User    @relation("recipient", fields: [recipient_id], references: [id], onDelete: Cascade)
+}
+
+// 10. Events
+model Event {
+  id             Int      @id @default(autoincrement())
+  business_id    Int
+  title          String
+  description    String?
+  date           DateTime
+  time           String
+  location       String?
+  image_url      String?
+  ticket_price   Float?
+  max_attendees  Int?
+  attendee_count Int      @default(0)
+  status         String   @default("active")
+  created_at     DateTime @default(now())
+
+  business      BusinessCard        @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  registrations EventRegistration[]
+}
+
+// 11. Event Registrations
+model EventRegistration {
+  id            Int      @id @default(autoincrement())
+  event_id      Int
+  user_id       Int
+  ticket_count  Int      @default(1)
+  registered_at DateTime @default(now())
+
+  event Event @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// 12. Notifications
+model Notification {
+  id          Int      @id @default(autoincrement())
+  user_id     Int
+  title       String
+  description String?
+  type        String?
+  is_read     Boolean  @default(false)
+  created_at  DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// 13. Messages
+model Message {
+  id          Int      @id @default(autoincrement())
+  sender_id   Int
+  receiver_id Int
+  content     String
+  is_read     Boolean  @default(false)
+  created_at  DateTime @default(now())
+
+  sender   User @relation("sender", fields: [sender_id], references: [id], onDelete: Cascade)
+  receiver User @relation("receiver", fields: [receiver_id], references: [id], onDelete: Cascade)
+}
+
+// 14. Favorites
+model Favorite {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  card_id    Int
+  created_at DateTime @default(now())
+
+  user User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  card BusinessCard @relation(fields: [card_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, card_id])
+}
+
+// 15. Ads
+model Ad {
+  id          Int      @id @default(autoincrement())
+  business_id Int
+  title       String
+  description String?
+  image_url   String?
+  cta_url     String?
+  ad_type     AdType
+  budget      Float?
+  spent       Float    @default(0)
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  status      String   @default("active")
+  start_date  DateTime?
+  end_date    DateTime?
+  created_at  DateTime @default(now())
+
+  business    BusinessCard   @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  ad_impressions AdImpression[]
+  ad_clicks      AdClick[]
+}
+
+// 16. Ad Impressions
+model AdImpression {
+  id         Int      @id @default(autoincrement())
+  ad_id      Int
+  user_id    Int?
+  created_at DateTime @default(now())
+
+  ad   Ad    @relation(fields: [ad_id], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [user_id], references: [id], onDelete: SetNull)
+}
+
+// 17. Ad Clicks
+model AdClick {
+  id         Int      @id @default(autoincrement())
+  ad_id      Int
+  user_id    Int?
+  created_at DateTime @default(now())
+
+  ad   Ad    @relation(fields: [ad_id], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [user_id], references: [id], onDelete: SetNull)
+}
+
+// 18. Leads
+model Lead {
+  id             Int        @id @default(autoincrement())
+  business_id    Int
+  customer_name  String
+  customer_phone String?
+  customer_email String?
+  message        String?
+  status         LeadStatus @default(new)
+  created_at     DateTime   @default(now())
+
+  business BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
+}
+
+// 19. Loyalty Points
+model LoyaltyPoint {
+  id          Int      @id @default(autoincrement())
+  user_id     Int
+  points      Int
+  action      String
+  description String?
+  created_at  DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// 20. Referrals
+model Referral {
+  id           Int      @id @default(autoincrement())
+  referrer_id  Int
+  referred_id  Int
+  status       String   @default("pending")
+  reward_given Boolean  @default(false)
+  created_at   DateTime @default(now())
+
+  referrer User @relation("referrer", fields: [referrer_id], references: [id], onDelete: Cascade)
+  referred User @relation("referred", fields: [referred_id], references: [id], onDelete: Cascade)
+}
+
+// 21. Campaigns
+model Campaign {
+  id              Int      @id @default(autoincrement())
+  admin_id        Int
+  title           String
+  body            String?
+  campaign_type   String?
+  target_audience String?
+  status          String   @default("draft")
+  sent_count      Int      @default(0)
+  created_at      DateTime @default(now())
+
+  admin User @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+}
+
+// 22. Activity Logs
+model ActivityLog {
+  id          Int      @id @default(autoincrement())
+  event_type  String
+  entity_type String?
+  entity_id   Int?
+  metadata    Json?
+  admin_id    Int?
+  created_at  DateTime @default(now())
+
+  admin User? @relation(fields: [admin_id], references: [id], onDelete: SetNull)
+}
+
+// 23. Admin Alerts
+model AdminAlert {
+  id          Int      @id @default(autoincrement())
+  alert_type  String
+  severity    Severity
+  title       String
+  message     String?
+  entity_id   Int?
+  is_resolved Boolean  @default(false)
+  created_at  DateTime @default(now())
+}
+
+// 24. Admin Metrics Daily
+model AdminMetricDaily {
+  id                 Int      @id @default(autoincrement())
+  metric_date        DateTime @unique
+  total_users        Int      @default(0)
+  total_businesses   Int      @default(0)
+  total_bookings     Int      @default(0)
+  total_revenue      Float    @default(0)
+  pending_approvals  Int      @default(0)
+  active_ads         Int      @default(0)
+  new_signups_7d     Int      @default(0)
+  computed_at        DateTime @default(now())
+}
+
+// 25. Spam Flags
+model SpamFlag {
+  id          Int      @id @default(autoincrement())
+  flag_type   String
+  entity_type String
+  entity_id   Int
+  reason      String?
+  is_resolved Boolean  @default(false)
+  created_at  DateTime @default(now())
+}
+
+// 26. Synced Contacts
+model SyncedContact {
+  id           Int      @id @default(autoincrement())
+  user_id      Int
+  phone_number String
+  contact_name String?
+  created_at   DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, phone_number])
+}
+
+// 27. Card Analytics
+model CardAnalytic {
+  id              Int      @id @default(autoincrement())
+  card_id         Int
+  views           Int      @default(0)
+  shares          Int      @default(0)
+  saves           Int      @default(0)
+  whatsapp_clicks Int      @default(0)
+  call_clicks     Int      @default(0)
+  created_at      DateTime @default(now())
+
+  card BusinessCard @relation(fields: [card_id], references: [id], onDelete: Cascade)
+}
+
+// 28. Business Locations
+model BusinessLocation {
+  id          Int      @id @default(autoincrement())
+  business_id Int
+  label       String?
+  address     String
+  lat         Float?
+  lng         Float?
+  is_primary  Boolean  @default(false)
+
+  business BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
+}
+
+// 29. Business Staff
+model BusinessStaff {
+  id          Int     @id @default(autoincrement())
+  business_id Int
+  name        String
+  role        String?
+  phone       String?
+  email       String?
+
+  business BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
+}
+
+// 30. Business Photos
+model BusinessPhoto {
+  id          Int     @id @default(autoincrement())
+  business_id Int
+  photo_url   String
+  caption     String?
+  sort_order  Int     @default(0)
+
+  business BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
+}
+
+// 31. Admin Permissions
+model AdminPermission {
+  id                  Int     @id @default(autoincrement())
+  admin_user_id       Int
+  permission_category String
+  can_view            Boolean @default(false)
+  can_edit            Boolean @default(false)
+  can_delete          Boolean @default(false)
+  can_approve         Boolean @default(false)
+
+  admin User @relation(fields: [admin_user_id], references: [id], onDelete: Cascade)
+}
+
+// 32. Admin Access Invites
+model AdminAccessInvite {
+  id            Int          @id @default(autoincrement())
+  invited_email String
+  access_level  String
+  invited_by    Int
+  status        InviteStatus @default(pending)
+  created_at    DateTime     @default(now())
+
+  inviter User @relation(fields: [invited_by], references: [id], onDelete: Cascade)
+}

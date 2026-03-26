@@ -1,0 +1,36 @@
+{
+  "name": "instantlly-cards-backend-main",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DevFarhanCoder/Instantlly-cards-backend-main.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/DevFarhanCoder/Instantlly-cards-backend-main/issues"
+  },
+  "homepage": "https://github.com/DevFarhanCoder/Instantlly-cards-backend-main#readme",
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.5.0",
+    "prisma": "^6.12.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "@prisma/client": "^7.5.0",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3"
+  }
+}
