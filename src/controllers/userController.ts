@@ -93,3 +93,35 @@ export async function upsertUserLocation(req: AuthRequest, res: Response): Promi
   res.json(jsonSafe(location));
 }
 
+export async function deleteMe(req: AuthRequest, res: Response): Promise<void> {
+  const userId = req.user!.userId;
+  try {
+    const anonymized = `deleted_${userId}_${Date.now()}`;
+    await prisma.$transaction(async (tx) => {
+      // Revoke all sessions
+      await tx.refreshToken.deleteMany({ where: { user_id: userId } });
+      // Remove profile record
+      await tx.profile.deleteMany({ where: { user_id: userId } });
+      // Remove roles
+      await tx.userRole.deleteMany({ where: { user_id: userId } });
+      // Anonymize personal data (soft delete — preserves referential integrity)
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          email: `${anonymized}@deleted.invalid`,
+          phone: anonymized,
+          name: null,
+          about: null,
+          profile_picture: null,
+          password_hash: null,
+        },
+      });
+    });
+    console.log(`[DELETE-ACCOUNT] Anonymized userId: ${userId}`);
+    res.json({ message: 'Account deleted' });
+  } catch (err) {
+    console.error('[DELETE-ACCOUNT] Failed', err);
+    res.status(500).json({ error: 'Failed to delete account' });
+  }
+}
+
