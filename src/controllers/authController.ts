@@ -1,0 +1,199 @@
+import { Request, Response } from 'express';
+import bcrypt from 'bcryptjs';
+import prisma from '../utils/prisma';
+import {
+  signAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+  hashToken,
+  refreshTokenExpiry,
+} from '../utils/jwt';
+import { AuthRequest } from '../middleware/auth';
+import { jsonSafe } from '../utils/serialize';
+import { normalizePhone, phoneVariants } from '../utils/phone';
+
+async function getUserRoles(userId: number): Promise<string[]> {
+  const roles = await prisma.userRole.findMany({ where: { user_id: userId } });
+  return roles.map((r) => r.role);
+}
+
+export async function signup(req: Request, res: Response): Promise<void> {
+  const { phone, email, password, name } = req.body;
+  const normalizedPhone = phone ? normalizePhone(phone) : phone;
+  console.log(`[SIGNUP] Attempt — phone: ${phone} → normalized: ${normalizedPhone} (bare), email: ${email ?? 'N/A'}, name: ${name ?? 'N/A'}`);
+
+  try {
+    const variants = phone ? phoneVariants(phone) : [];
+    const existing = await prisma.user.findFirst({
+      where: {
+        OR: [
+          ...(variants.map((p) => ({ phone: p }))),
+          ...(email ? [{ email }] : []),
+        ],
+      },
+    });
+    if (existing) {
+      console.warn(`[SIGNUP] Conflict — phone/email already registered: ${normalizedPhone ?? email}`);
+      res.status(409).json({ error: 'User with this phone/email already exists' });
+      return;
+    }
+
+    const password_hash = await bcrypt.hash(password, 10);
+    const user = await prisma.user.create({
+      data: { phone: normalizedPhone, email: email || null, password_hash, name: name || null },
+    });
+    console.log(`[SIGNUP] User created — id: ${user.id}, phone: ${user.phone}`);
+
+    // Default role: CUSTOMER
+    await prisma.userRole.create({ data: { user_id: user.id, role: 'customer' } });
+    console.log(`[SIGNUP] Role assigned — userId: ${user.id}, role: customer`);
+
+    const roles = ['customer'];
+    const accessToken = signAccessToken({ userId: user.id, roles });
+    const refreshToken = signRefreshToken({ userId: user.id, roles });
+    await prisma.refreshToken.create({
+      data: {
+        user_id: user.id,
+        token_hash: hashToken(refreshToken),
+        expires_at: refreshTokenExpiry(),
+      },
+    });
+    console.log(`[SIGNUP] Tokens issued — userId: ${user.id}`);
+
+    res.status(201).json({
+      accessToken,
+      refreshToken,
+      user: { id: user.id, phone: user.phone, email: user.email, name: user.name, roles },
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2002') {
+      console.warn(`[SIGNUP] Conflict (unique constraint) — ${normalizedPhone ?? email}`);
+      res.status(409).json({ error: 'User with this phone/email already exists' });
+      return;
+    }
+    console.error('[SIGNUP] Failed', err);
+    res.status(500).json({ error: 'Signup failed' });
+  }
+}
+
+export async function login(req: Request, res: Response): Promise<void> {
+  const { phone, email, password } = req.body;
+  console.log(`[LOGIN] Attempt — identifier: ${phone ?? email}`);
+
+  const variants = phone ? phoneVariants(phone) : [];
+  console.log(`[LOGIN] Phone variants to try: [${variants.join(', ')}]`);
+
+  const user = await prisma.user.findFirst({
+    where: {
+      OR: [
+        ...(variants.map((p) => ({ phone: p }))),
+        ...(email ? [{ email }] : []),
+      ],
+    },
+  });
+  if (!user || !user.password_hash) {
+    console.warn(`[LOGIN] Failed — user not found for: ${phone ?? email} (tried variants: ${variants.join(', ')})`);
+    res.status(401).json({ error: 'Invalid credentials' });
+    return;
+  }
+
+  const valid = await bcrypt.compare(password, user.password_hash);
+  if (!valid) {
+    console.warn(`[LOGIN] Failed — wrong password for userId: ${user.id}`);
+    res.status(401).json({ error: 'Invalid credentials' });
+    return;
+  }
+
+  const roles = await getUserRoles(user.id);
+  console.log(`[LOGIN] Success — userId: ${user.id}, roles: [${roles.join(', ')}]`);
+
+  const accessToken = signAccessToken({ userId: user.id, roles });
+  const refreshToken = signRefreshToken({ userId: user.id, roles });
+  await prisma.refreshToken.create({
+    data: {
+      user_id: user.id,
+      token_hash: hashToken(refreshToken),
+      expires_at: refreshTokenExpiry(),
+    },
+  });
+  console.log(`[LOGIN] Tokens issued — userId: ${user.id}`);
+
+  res.json({
+    accessToken,
+    refreshToken,
+    user: { id: user.id, phone: user.phone, email: user.email, name: user.name, roles },
+  });
+}
+
+export async function refresh(req: Request, res: Response): Promise<void> {
+  const { refreshToken } = req.body;
+  if (!refreshToken) {
+    res.status(400).json({ error: 'refreshToken required' });
+    return;
+  }
+
+  let payload;
+  try {
+    payload = verifyRefreshToken(refreshToken);
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired refresh token' });
+    return;
+  }
+
+  const tokenHash = hashToken(refreshToken);
+  const stored = await prisma.refreshToken.findFirst({
+    where: { user_id: payload.userId, token_hash: tokenHash },
+  });
+  if (!stored || stored.expires_at < new Date()) {
+    res.status(401).json({ error: 'Refresh token revoked or expired' });
+    return;
+  }
+
+  // Rotate: delete old, issue new
+  await prisma.refreshToken.delete({ where: { id: stored.id } });
+
+  const roles = await getUserRoles(payload.userId);
+  const newAccess = signAccessToken({ userId: payload.userId, roles });
+  const newRefresh = signRefreshToken({ userId: payload.userId, roles });
+  await prisma.refreshToken.create({
+    data: {
+      user_id: payload.userId,
+      token_hash: hashToken(newRefresh),
+      expires_at: refreshTokenExpiry(),
+    },
+  });
+
+  res.json({ accessToken: newAccess, refreshToken: newRefresh });
+}
+
+export async function logout(req: AuthRequest, res: Response): Promise<void> {
+  const { refreshToken } = req.body;
+  if (refreshToken) {
+    await prisma.refreshToken.deleteMany({
+      where: { user_id: req.user!.userId, token_hash: hashToken(refreshToken) },
+    });
+  }
+  res.json({ message: 'Logged out' });
+}
+
+export async function me(req: AuthRequest, res: Response): Promise<void> {
+  const user = await prisma.user.findUnique({
+    where: { id: req.user!.userId },
+    include: { profile: true, user_roles: true },
+  });
+  if (!user) {
+    res.status(404).json({ error: 'User not found' });
+    return;
+  }
+  res.json({
+    id: user.id,
+    phone: user.phone,
+    email: user.email,
+    name: user.name,
+    profile_picture: user.profile_picture,
+    roles: user.user_roles.map((r) => r.role),
+    profile: jsonSafe(user.profile),
+  });
+}
+
+
