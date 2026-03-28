@@ -1,6 +1,9 @@
+
 import express from 'express';
+import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import prisma from './prismaClient';
 
 const app = express();
 const httpServer = createServer(app);
@@ -14,11 +17,19 @@ const io = new Server(httpServer, {
 });
 
 // Middleware
+app.use(cors()); // Enable CORS for all routes
 app.use(express.json());
 
 // Basic health check route
-app.get('/', (req, res) => {
-  res.json({ message: 'Server is running!' });
+
+app.get('/', async (req, res) => {
+  // Test Prisma connection
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ message: 'Server is running and connected to PostgreSQL!' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server running, but failed to connect to PostgreSQL', error: String(error) });
+  }
 });
 
 // Socket.IO connection handling
