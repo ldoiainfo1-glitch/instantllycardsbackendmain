@@ -1,62 +1,63 @@
-
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import prisma from './prismaClient';
+
+import authRoutes from './routes/auth';
+import userRoutes from './routes/users';
+import categoryRoutes from './routes/categories';
+import businessCardRoutes from './routes/businessCards';
+import promotionRoutes from './routes/promotions';
+import voucherRoutes from './routes/vouchers';
+import adRoutes from './routes/ads';
+import reviewRoutes from './routes/reviews';
+import adminRoutes from './routes/admin';
 
 const app = express();
 const httpServer = createServer(app);
 
-// Socket.IO setup with CORS
+// Socket.IO
 const io = new Server(httpServer, {
-  cors: {
-    origin: "*", // Configure for your frontend URL in production
-    methods: ["GET", "POST"]
-  }
+  cors: { origin: '*', methods: ['GET', 'POST'] },
 });
 
 // Middleware
-app.use(cors()); // Enable CORS for all routes
+app.use(cors());
 app.use(express.json());
 
-// Basic health check route
+// Health check
+app.get('/', (_req, res) => res.json({ message: 'Instantlly API running', version: '2.0.0' }));
 
-app.get('/', async (req, res) => {
-  // Test Prisma connection
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    res.json({ message: 'Server is running and connected to PostgreSQL!' });
-  } catch (error) {
-    res.status(500).json({ message: 'Server running, but failed to connect to PostgreSQL', error: String(error) });
-  }
-});
+// API Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/categories', categoryRoutes);
+app.use('/api/cards', businessCardRoutes);
+app.use('/api/promotions', promotionRoutes);
+app.use('/api/vouchers', voucherRoutes);
+app.use('/api/ads', adRoutes);
+app.use('/api/reviews', reviewRoutes);
+app.use('/api/admin', adminRoutes);
 
-// Socket.IO connection handling
+// Socket.IO
 io.on('connection', (socket) => {
   console.log('✅ User connected:', socket.id);
 
-  // Handle custom events
   socket.on('message', (data) => {
-    console.log('📩 Message received:', data);
-    // Broadcast to all connected clients
     io.emit('message', data);
   });
 
-  // Handle room joining
   socket.on('join-room', (roomId: string) => {
     socket.join(roomId);
-    console.log(`User ${socket.id} joined room: ${roomId}`);
   });
 
-  // Handle disconnection
   socket.on('disconnect', () => {
     console.log('❌ User disconnected:', socket.id);
   });
 });
 
-// Start server
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 httpServer.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });

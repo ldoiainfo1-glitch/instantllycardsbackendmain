@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "User" ALTER COLUMN "credits" SET DATA TYPE BIGINT,
+ALTER COLUMN "voucher_balance" SET DATA TYPE BIGINT;
