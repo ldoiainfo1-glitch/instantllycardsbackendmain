@@ -18,9 +18,16 @@ async function getUserRoles(userId: number): Promise<string[]> {
 }
 
 export async function signup(req: Request, res: Response): Promise<void> {
-  const { phone, email, password, name } = req.body;
+  const { phone, email, password, name, role = 'customer' } = req.body;
   const normalizedPhone = phone ? normalizePhone(phone) : phone;
-  console.log(`[SIGNUP] Attempt — phone: ${phone} → normalized: ${normalizedPhone} (bare), email: ${email ?? 'N/A'}, name: ${name ?? 'N/A'}`);
+  console.log(`[SIGNUP] Attempt — phone: ${phone} → normalized: ${normalizedPhone}, email: ${email ?? 'N/A'}, name: ${name ?? 'N/A'}, role: ${role}`);
+
+  const validRoles = ['customer', 'business'];
+  if (!validRoles.includes(role)) {
+    console.warn(`[SIGNUP] Invalid role: ${role}`);
+    res.status(400).json({ error: `Role must be one of: ${validRoles.join(', ')}` });
+    return;
+  }
 
   try {
     const variants = phone ? phoneVariants(phone) : [];
@@ -39,31 +46,43 @@ export async function signup(req: Request, res: Response): Promise<void> {
     }
 
     const password_hash = await bcrypt.hash(password, 10);
-    const user = await prisma.user.create({
-      data: { phone: normalizedPhone, email: email || null, password_hash, name: name || null },
-    });
-    console.log(`[SIGNUP] User created — id: ${user.id}, phone: ${user.phone}`);
+    const roles = [role];
 
-    // Default role: CUSTOMER
-    await prisma.userRole.create({ data: { user_id: user.id, role: 'customer' } });
-    console.log(`[SIGNUP] Role assigned — userId: ${user.id}, role: customer`);
+    // Atomic transaction: user + role + refresh token all succeed or all roll back
+    const result = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: { phone: normalizedPhone, email: email || null, password_hash, name: name || null },
+      });
+      console.log(`[SIGNUP] User created — id: ${user.id}, phone: ${user.phone}`);
 
-    const roles = ['customer'];
-    const accessToken = signAccessToken({ userId: user.id, roles });
-    const refreshToken = signRefreshToken({ userId: user.id, roles });
-    await prisma.refreshToken.create({
-      data: {
-        user_id: user.id,
-        token_hash: hashToken(refreshToken),
-        expires_at: refreshTokenExpiry(),
-      },
+      await tx.userRole.create({ data: { user_id: user.id, role } });
+      console.log(`[SIGNUP] Role assigned — userId: ${user.id}, role: ${role}`);
+
+      const accessToken = signAccessToken({ userId: user.id, roles });
+      const refreshToken = signRefreshToken({ userId: user.id, roles });
+
+      await tx.refreshToken.create({
+        data: {
+          user_id: user.id,
+          token_hash: hashToken(refreshToken),
+          expires_at: refreshTokenExpiry(),
+        },
+      });
+      console.log(`[SIGNUP] Tokens issued — userId: ${user.id}`);
+
+      return { user, accessToken, refreshToken };
     });
-    console.log(`[SIGNUP] Tokens issued — userId: ${user.id}`);
 
     res.status(201).json({
-      accessToken,
-      refreshToken,
-      user: { id: user.id, phone: user.phone, email: user.email, name: user.name, roles },
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      user: {
+        id: result.user.id,
+        phone: result.user.phone,
+        email: result.user.email,
+        name: result.user.name,
+        roles,
+      },
     });
   } catch (err: any) {
     if (err?.code === 'P2002') {
@@ -80,49 +99,67 @@ export async function login(req: Request, res: Response): Promise<void> {
   const { phone, email, password } = req.body;
   console.log(`[LOGIN] Attempt — identifier: ${phone ?? email}`);
 
-  const variants = phone ? phoneVariants(phone) : [];
-  console.log(`[LOGIN] Phone variants to try: [${variants.join(', ')}]`);
+  try {
+    const variants = phone ? phoneVariants(phone) : [];
+    console.log(`[LOGIN] Phone variants to try: [${variants.join(', ')}]`);
 
-  const user = await prisma.user.findFirst({
-    where: {
-      OR: [
-        ...(variants.map((p) => ({ phone: p }))),
-        ...(email ? [{ email }] : []),
-      ],
-    },
-  });
-  if (!user || !user.password_hash) {
-    console.warn(`[LOGIN] Failed — user not found for: ${phone ?? email} (tried variants: ${variants.join(', ')})`);
-    res.status(401).json({ error: 'Invalid credentials' });
-    return;
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          ...(variants.map((p) => ({ phone: p }))),
+          ...(email ? [{ email }] : []),
+        ],
+      },
+    });
+    if (!user || !user.password_hash) {
+      console.warn(`[LOGIN] Failed — user not found for: ${phone ?? email} (tried variants: ${variants.join(', ')})`);
+      res.status(401).json({ error: 'Invalid credentials' });
+      return;
+    }
+
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) {
+      console.warn(`[LOGIN] Failed — wrong password for userId: ${user.id}`);
+      res.status(401).json({ error: 'Invalid credentials' });
+      return;
+    }
+
+    let roles = await getUserRoles(user.id);
+
+    // Check if user has active business promotion (eligible for dual role)
+    const hasActivePromotion = await prisma.businessPromotion.findFirst({
+      where: { user_id: user.id, is_active: true },
+    });
+
+    if (hasActivePromotion && !roles.includes('business')) {
+      // Persist to DB so token refresh continues to include the role
+      await prisma.userRole.create({ data: { user_id: user.id, role: 'business' } });
+      console.log(`[LOGIN] Business promotion detected — persisted business role for userId: ${user.id}`);
+      roles.push('business');
+    }
+
+    console.log(`[LOGIN] Success — userId: ${user.id}, roles: [${roles.join(', ')}]`);
+
+    const accessToken = signAccessToken({ userId: user.id, roles });
+    const refreshToken = signRefreshToken({ userId: user.id, roles });
+    await prisma.refreshToken.create({
+      data: {
+        user_id: user.id,
+        token_hash: hashToken(refreshToken),
+        expires_at: refreshTokenExpiry(),
+      },
+    });
+    console.log(`[LOGIN] Tokens issued — userId: ${user.id}`);
+
+    res.json({
+      accessToken,
+      refreshToken,
+      user: { id: user.id, phone: user.phone, email: user.email, name: user.name, roles },
+    });
+  } catch (err: any) {
+    console.error('[LOGIN] Failed', err);
+    res.status(500).json({ error: 'Login failed' });
   }
-
-  const valid = await bcrypt.compare(password, user.password_hash);
-  if (!valid) {
-    console.warn(`[LOGIN] Failed — wrong password for userId: ${user.id}`);
-    res.status(401).json({ error: 'Invalid credentials' });
-    return;
-  }
-
-  const roles = await getUserRoles(user.id);
-  console.log(`[LOGIN] Success — userId: ${user.id}, roles: [${roles.join(', ')}]`);
-
-  const accessToken = signAccessToken({ userId: user.id, roles });
-  const refreshToken = signRefreshToken({ userId: user.id, roles });
-  await prisma.refreshToken.create({
-    data: {
-      user_id: user.id,
-      token_hash: hashToken(refreshToken),
-      expires_at: refreshTokenExpiry(),
-    },
-  });
-  console.log(`[LOGIN] Tokens issued — userId: ${user.id}`);
-
-  res.json({
-    accessToken,
-    refreshToken,
-    user: { id: user.id, phone: user.phone, email: user.email, name: user.name, roles },
-  });
 }
 
 export async function refresh(req: Request, res: Response): Promise<void> {
@@ -168,11 +205,13 @@ export async function refresh(req: Request, res: Response): Promise<void> {
 
 export async function logout(req: AuthRequest, res: Response): Promise<void> {
   const { refreshToken } = req.body;
-  if (refreshToken) {
-    await prisma.refreshToken.deleteMany({
-      where: { user_id: req.user!.userId, token_hash: hashToken(refreshToken) },
-    });
+  if (!refreshToken) {
+    res.status(400).json({ error: 'refreshToken required' });
+    return;
   }
+  await prisma.refreshToken.deleteMany({
+    where: { user_id: req.user!.userId, token_hash: hashToken(refreshToken) },
+  });
   res.json({ message: 'Logged out' });
 }
 
@@ -190,10 +229,41 @@ export async function me(req: AuthRequest, res: Response): Promise<void> {
     phone: user.phone,
     email: user.email,
     name: user.name,
+    about: user.about,
+    gender: user.gender,
     profile_picture: user.profile_picture,
     roles: user.user_roles.map((r) => r.role),
     profile: jsonSafe(user.profile),
   });
 }
 
+export async function changePassword(req: AuthRequest, res: Response): Promise<void> {
+  const { currentPassword, newPassword } = req.body;
+  const userId = req.user!.userId;
 
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.password_hash) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const valid = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!valid) {
+      res.status(401).json({ error: 'Current password is incorrect' });
+      return;
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await prisma.user.update({ where: { id: userId }, data: { password_hash: newHash } });
+
+    // Revoke all refresh tokens so other devices must re-login
+    await prisma.refreshToken.deleteMany({ where: { user_id: userId } });
+
+    console.log(`[CHANGE-PASSWORD] Success — userId: ${userId}`);
+    res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    console.error('[CHANGE-PASSWORD] Failed', err);
+    res.status(500).json({ error: 'Failed to update password' });
+  }
+}
