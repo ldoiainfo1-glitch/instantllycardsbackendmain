@@ -153,6 +153,7 @@ model User {
   vouchers_original   Voucher[] @relation("VoucherOriginalOwner")
   vouchers_created    Voucher[] @relation("VoucherAdmin")
   vouchers_transferred_from Voucher[] @relation("VoucherTransferredFrom")
+  refresh_tokens RefreshToken[] @relation("UserRefreshTokens")
 
   referred_by   User? @relation("UserReferrals", fields: [referred_by_id], references: [id], onDelete: SetNull)
   referred_users User[] @relation("UserReferrals")
@@ -182,6 +183,17 @@ model UserRole {
   role    Role
 
   user User @relation("UserRoles", fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// 3b. Refresh Tokens
+model RefreshToken {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  token_hash String
+  expires_at DateTime
+  created_at DateTime @default(now())
+
+  user User @relation("UserRefreshTokens", fields: [user_id], references: [id], onDelete: Cascade)
 }
 
 // 4. Business Cards
@@ -249,6 +261,12 @@ model BusinessCard {
   card_shares        CardShare[] @relation("BusinessCardShares")
   shared_cards       SharedCard[] @relation("BusinessCardSharedCards")
   group_shared_cards GroupSharedCard[] @relation("BusinessCardGroupSharedCards")
+
+  @@index([user_id])
+  @@index([created_at])
+  @@index([category])
+  @@index([company_name])
+  @@index([full_name])
 }
 
 // 5. Bookings
@@ -269,6 +287,10 @@ model Booking {
 
   user     User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
   business BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id])
+  @@index([user_id])
+  @@index([created_at])
 }
 
 // 6. Reviews
@@ -349,6 +371,10 @@ model Voucher {
   special_credits SpecialCredit[] @relation("VoucherSpecialCredits")
   voucher_redemptions VoucherRedemption[]
   voucher_transfer_logs VoucherTransferLog[]
+
+  @@index([business_id])
+  @@index([status])
+  @@index([expires_at])
 }
 
 // 8. Voucher Claims
@@ -1064,6 +1090,16 @@ model BusinessPromotion {
   business_card BusinessCard? @relation("BusinessCardPromotions", fields: [business_card_id], references: [id], onDelete: SetNull)
   promotion_orders PromotionOrder[] @relation("BusinessPromotionOrders")
   enquiries Enquiry[] @relation("BusinessPromotionEnquiries")
+
+  @@index([user_id])
+  @@index([business_card_id])
+  @@index([listing_type])
+  @@index([status])
+  @@index([is_active])
+  @@index([created_at])
+  @@index([city])
+  @@index([state])
+  @@index([category], type: Gin)
 }
 
 model PromotionPricingPlan {
