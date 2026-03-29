@@ -1,66 +1,65 @@
 {
-    "name":  "instantlly-cards-backend-main",
-    "version":  "2.0.0",
-    "description":  "",
-    "main":  "index.js",
-    "scripts":  {
-                    "dev":  "ts-node src/index.ts",
-                    "build":  "tsc",
-                    "start":  "node dist/index.js",
-                    "test":  "jest --runInBand --forceExit",
-                    "assign:roles":  "ts-node src/scripts/assignRoles.ts",
-                    "clean:phones":  "ts-node src/scripts/cleanPhones.ts",
-                    "migrate:mongo":  "ts-node src/scripts/migrate.ts",
-                    "test:db":  "powershell -ExecutionPolicy Bypass -File scripts\\\\test-db.ps1",
-                    "test:db:clean":  "powershell -ExecutionPolicy Bypass -File scripts\\\\drop-tests-schema.ps1"
-                },
-    "jest":  {
-                 "preset":  "ts-jest",
-                 "testEnvironment":  "node",
-                 "testMatch":  [
-                                   "**/src/tests/**/*.test.ts"
-                               ]
-             },
-    "repository":  {
-                       "type":  "git",
-                       "url":  "git+https://github.com/DevFarhanCoder/Instantlly-cards-backend-main.git"
-                   },
-    "keywords":  [
-
-                 ],
-    "author":  "",
-    "license":  "ISC",
-    "type":  "commonjs",
-    "bugs":  {
-                 "url":  "https://github.com/DevFarhanCoder/Instantlly-cards-backend-main/issues"
-             },
-    "homepage":  "https://github.com/DevFarhanCoder/Instantlly-cards-backend-main#readme",
-    "devDependencies":  {
-                            "@types/bcryptjs":  "^2.4.6",
-                            "@types/cors":  "^2.8.19",
-                            "@types/express":  "^5.0.6",
-                            "@types/jest":  "^29.5.14",
-                            "@types/jsonwebtoken":  "^9.0.10",
-                            "@types/node":  "^25.5.0",
-                            "@types/supertest":  "^6.0.3",
-                            "dotenv":  "^16.4.7",
-                            "jest":  "^29.7.0",
-                            "prisma":  "^7.5.0",
-                            "supertest":  "^7.2.2",
-                            "ts-jest":  "^29.4.6",
-                            "ts-node":  "^10.9.2",
-                            "typescript":  "^6.0.2"
-                        },
-    "dependencies":  {
-                         "@prisma/adapter-pg":  "^7.5.0",
-                         "@prisma/client":  "^7.5.0",
-                         "bcryptjs":  "^3.0.3",
-                         "cors":  "^2.8.6",
-                         "express":  "^5.2.1",
-                         "express-validator":  "^7.3.1",
-                         "jsonwebtoken":  "^9.0.3",
-                         "mongodb":  "^6.21.0",
-                         "pg":  "^8.16.3",
-                         "socket.io":  "^4.8.3"
-                     }
+    "name": "instantlly-cards-backend-main",
+    "version": "2.0.0",
+    "description": "",
+    "main": "index.js",
+    "scripts": {
+        "dev": "ts-node src/index.ts",
+        "build": "tsc",
+        "start": "node dist/index.js",
+        "test": "jest --runInBand --forceExit",
+        "assign:roles": "ts-node src/scripts/assignRoles.ts",
+        "clean:phones": "ts-node src/scripts/cleanPhones.ts",
+        "migrate:mongo": "ts-node src/scripts/migrate.ts",
+        "test:db": "powershell -ExecutionPolicy Bypass -File scripts\\\\test-db.ps1",
+        "test:db:clean": "powershell -ExecutionPolicy Bypass -File scripts\\\\drop-tests-schema.ps1"
+    },
+    "jest": {
+        "preset": "ts-jest",
+        "testEnvironment": "node",
+        "testMatch": [
+            "**/src/tests/**/*.test.ts"
+        ]
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/DevFarhanCoder/Instantlly-cards-backend-main.git"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "type": "commonjs",
+    "bugs": {
+        "url": "https://github.com/DevFarhanCoder/Instantlly-cards-backend-main/issues"
+    },
+    "homepage": "https://github.com/DevFarhanCoder/Instantlly-cards-backend-main#readme",
+    "devDependencies": {
+        "@types/bcryptjs": "^2.4.6",
+        "@types/cors": "^2.8.19",
+        "@types/express": "^5.0.6",
+        "@types/jest": "^29.5.14",
+        "@types/jsonwebtoken": "^9.0.10",
+        "@types/node": "^25.5.0",
+        "@types/supertest": "^6.0.3",
+        "dotenv": "^16.4.7",
+        "jest": "^29.7.0",
+        "prisma": "^7.5.0",
+        "supertest": "^7.2.2",
+        "ts-jest": "^29.4.6",
+        "ts-node": "^10.9.2",
+        "typescript": "^6.0.2"
+    },
+    "dependencies": {
+        "@prisma/adapter-pg": "^7.5.0",
+        "@prisma/client": "^7.5.0",
+        "bcryptjs": "^3.0.3",
+        "cors": "^2.8.6",
+        "express": "^5.2.1",
+        "express-rate-limit": "^8.3.1",
+        "express-validator": "^7.3.1",
+        "jsonwebtoken": "^9.0.3",
+        "mongodb": "^6.21.0",
+        "pg": "^8.16.3",
+        "socket.io": "^4.8.3"
+    }
 }
