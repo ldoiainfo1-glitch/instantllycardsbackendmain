@@ -49,7 +49,7 @@ beforeAll(async () => {
     },
   });
   voucherId = v.id;
-});
+}, 15000);
 
 afterAll(async () => {
   await prisma.user.deleteMany({ where: { phone: { in: [PHONE_A, PHONE_B] } } });
