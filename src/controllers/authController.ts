@@ -12,6 +12,10 @@ import { AuthRequest } from '../middleware/auth';
 import { jsonSafe } from '../utils/serialize';
 import { normalizePhone, phoneVariants } from '../utils/phone';
 
+const IS_PROD = process.env.NODE_ENV === 'production';
+const log = (...args: any[]) => { if (!IS_PROD) console.log(...args); };
+const warn = (...args: any[]) => { if (!IS_PROD) console.warn(...args); };
+
 async function getUserRoles(userId: number): Promise<string[]> {
   const roles = await prisma.userRole.findMany({ where: { user_id: userId } });
   return roles.map((r) => r.role);
@@ -20,11 +24,11 @@ async function getUserRoles(userId: number): Promise<string[]> {
 export async function signup(req: Request, res: Response): Promise<void> {
   const { phone, email, password, name, role = 'customer' } = req.body;
   const normalizedPhone = phone ? normalizePhone(phone) : phone;
-  console.log(`[SIGNUP] Attempt — phone: ${phone} → normalized: ${normalizedPhone}, email: ${email ?? 'N/A'}, name: ${name ?? 'N/A'}, role: ${role}`);
+  log(`[SIGNUP] Attempt — phone: ${phone} → normalized: ${normalizedPhone}, email: ${email ?? 'N/A'}, name: ${name ?? 'N/A'}, role: ${role}`);
 
   const validRoles = ['customer', 'business'];
   if (!validRoles.includes(role)) {
-    console.warn(`[SIGNUP] Invalid role: ${role}`);
+    warn(`[SIGNUP] Invalid role: ${role}`);
     res.status(400).json({ error: `Role must be one of: ${validRoles.join(', ')}` });
     return;
   }
@@ -40,7 +44,7 @@ export async function signup(req: Request, res: Response): Promise<void> {
       },
     });
     if (existing) {
-      console.warn(`[SIGNUP] Conflict — phone/email already registered: ${normalizedPhone ?? email}`);
+      warn(`[SIGNUP] Conflict — phone/email already registered: ${normalizedPhone ?? email}`);
       res.status(409).json({ error: 'User with this phone/email already exists' });
       return;
     }
@@ -53,10 +57,10 @@ export async function signup(req: Request, res: Response): Promise<void> {
       const user = await tx.user.create({
         data: { phone: normalizedPhone, email: email || null, password_hash, name: name || null },
       });
-      console.log(`[SIGNUP] User created — id: ${user.id}, phone: ${user.phone}`);
+      log(`[SIGNUP] User created — id: ${user.id}, phone: ${user.phone}`);
 
       await tx.userRole.create({ data: { user_id: user.id, role } });
-      console.log(`[SIGNUP] Role assigned — userId: ${user.id}, role: ${role}`);
+      log(`[SIGNUP] Role assigned — userId: ${user.id}, role: ${role}`);
 
       const accessToken = signAccessToken({ userId: user.id, roles });
       const refreshToken = signRefreshToken({ userId: user.id, roles });
@@ -68,7 +72,7 @@ export async function signup(req: Request, res: Response): Promise<void> {
           expires_at: refreshTokenExpiry(),
         },
       });
-      console.log(`[SIGNUP] Tokens issued — userId: ${user.id}`);
+      log(`[SIGNUP] Tokens issued — userId: ${user.id}`);
 
       return { user, accessToken, refreshToken };
     });
@@ -86,7 +90,7 @@ export async function signup(req: Request, res: Response): Promise<void> {
     });
   } catch (err: any) {
     if (err?.code === 'P2002') {
-      console.warn(`[SIGNUP] Conflict (unique constraint) — ${normalizedPhone ?? email}`);
+      warn(`[SIGNUP] Conflict (unique constraint) — ${normalizedPhone ?? email}`);
       res.status(409).json({ error: 'User with this phone/email already exists' });
       return;
     }
@@ -97,11 +101,11 @@ export async function signup(req: Request, res: Response): Promise<void> {
 
 export async function login(req: Request, res: Response): Promise<void> {
   const { phone, email, password } = req.body;
-  console.log(`[LOGIN] Attempt — identifier: ${phone ?? email}`);
+  log(`[LOGIN] Attempt — identifier: ${phone ?? email}`);
 
   try {
     const variants = phone ? phoneVariants(phone) : [];
-    console.log(`[LOGIN] Phone variants to try: [${variants.join(', ')}]`);
+    log(`[LOGIN] Phone variants to try: [${variants.join(', ')}]`);
 
     const user = await prisma.user.findFirst({
       where: {
@@ -112,14 +116,14 @@ export async function login(req: Request, res: Response): Promise<void> {
       },
     });
     if (!user || !user.password_hash) {
-      console.warn(`[LOGIN] Failed — user not found for: ${phone ?? email} (tried variants: ${variants.join(', ')})`);
+      warn(`[LOGIN] Failed — user not found for: ${phone ?? email} (tried variants: ${variants.join(', ')})`);
       res.status(401).json({ error: 'Invalid credentials' });
       return;
     }
 
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
-      console.warn(`[LOGIN] Failed — wrong password for userId: ${user.id}`);
+      warn(`[LOGIN] Failed — wrong password for userId: ${user.id}`);
       res.status(401).json({ error: 'Invalid credentials' });
       return;
     }
@@ -134,11 +138,11 @@ export async function login(req: Request, res: Response): Promise<void> {
     if (hasActivePromotion && !roles.includes('business')) {
       // Persist to DB so token refresh continues to include the role
       await prisma.userRole.create({ data: { user_id: user.id, role: 'business' } });
-      console.log(`[LOGIN] Business promotion detected — persisted business role for userId: ${user.id}`);
+      log(`[LOGIN] Business promotion detected — persisted business role for userId: ${user.id}`);
       roles.push('business');
     }
 
-    console.log(`[LOGIN] Success — userId: ${user.id}, roles: [${roles.join(', ')}]`);
+    log(`[LOGIN] Success — userId: ${user.id}, roles: [${roles.join(', ')}]`);
 
     const accessToken = signAccessToken({ userId: user.id, roles });
     const refreshToken = signRefreshToken({ userId: user.id, roles });
@@ -149,7 +153,7 @@ export async function login(req: Request, res: Response): Promise<void> {
         expires_at: refreshTokenExpiry(),
       },
     });
-    console.log(`[LOGIN] Tokens issued — userId: ${user.id}`);
+    log(`[LOGIN] Tokens issued — userId: ${user.id}`);
 
     res.json({
       accessToken,
@@ -260,7 +264,7 @@ export async function changePassword(req: AuthRequest, res: Response): Promise<v
     // Revoke all refresh tokens so other devices must re-login
     await prisma.refreshToken.deleteMany({ where: { user_id: userId } });
 
-    console.log(`[CHANGE-PASSWORD] Success — userId: ${userId}`);
+    log(`[CHANGE-PASSWORD] Success — userId: ${userId}`);
     res.json({ message: 'Password updated successfully' });
   } catch (err) {
     console.error('[CHANGE-PASSWORD] Failed', err);

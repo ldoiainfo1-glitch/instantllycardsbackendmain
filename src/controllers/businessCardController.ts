@@ -3,157 +3,237 @@ import prisma from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { paramInt, queryInt, queryStr } from '../utils/params';
 
-export async function listCards(req: Request, res: Response): Promise<void> {
-  const page = queryInt(req.query.page, 1);
-  const limit = queryInt(req.query.limit, 20);
-  const search = queryStr(req.query.search);
+/** Whitelisted fields for card create/update — prevents arbitrary field injection. */
+const CARD_FIELDS = [
+  'full_name', 'birthdate', 'anniversary', 'gender', 'phone', 'whatsapp', 'telegram',
+  'email', 'location', 'maps_link', 'company_name', 'job_title', 'company_phone',
+  'company_email', 'website', 'company_address', 'company_maps_link', 'logo_url',
+  'description', 'business_hours', 'category', 'established_year', 'instagram',
+  'facebook', 'linkedin', 'youtube', 'twitter', 'keywords', 'offer', 'services',
+  'personal_country_code', 'company_country_code', 'company_photo', 'about_business',
+  'is_default', 'company_website', 'message', 'services_offered',
+] as const;
 
-  const cards = await prisma.businessCard.findMany({
-    where: search
+function pickCardFields(body: Record<string, any>): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const key of CARD_FIELDS) {
+    if (key in body) result[key] = body[key];
+  }
+  // Coerce date strings to Date objects for Prisma DateTime fields
+  for (const dateField of ['birthdate', 'anniversary'] as const) {
+    if (result[dateField] && typeof result[dateField] === 'string') {
+      const d = new Date(result[dateField]);
+      result[dateField] = isNaN(d.getTime()) ? null : d;
+    }
+  }
+  return result;
+}
+
+export async function listCards(req: Request, res: Response): Promise<void> {
+  try {
+    const page = queryInt(req.query.page, 1);
+    const limit = queryInt(req.query.limit, 20);
+    const search = queryStr(req.query.search);
+
+    const where = search
       ? {
           OR: [
-            { full_name: { contains: search, mode: 'insensitive' } },
-            { company_name: { contains: search, mode: 'insensitive' } },
-            { category: { contains: search, mode: 'insensitive' } },
+            { full_name: { contains: search, mode: 'insensitive' as const } },
+            { company_name: { contains: search, mode: 'insensitive' as const } },
+            { category: { contains: search, mode: 'insensitive' as const } },
           ],
         }
-      : undefined,
-    skip: (page - 1) * limit,
-    take: limit,
-    orderBy: { created_at: 'desc' },
-    select: {
-      id: true,
-      user_id: true,
-      full_name: true,
-      phone: true,
-      email: true,
-      company_name: true,
-      job_title: true,
-      logo_url: true,
-      description: true,
-      category: true,
-      services: true,
-      offer: true,
-      website: true,
-      business_hours: true,
-      location: true,
-      maps_link: true,
-      whatsapp: true,
-      telegram: true,
-      instagram: true,
-      facebook: true,
-      linkedin: true,
-      youtube: true,
-      twitter: true,
-      company_phone: true,
-      company_email: true,
-      company_address: true,
-      company_maps_link: true,
-      keywords: true,
-      established_year: true,
-      gender: true,
-      birthdate: true,
-      anniversary: true,
-      created_at: true,
-      updated_at: true,
-    },
-  });
-  res.json({ data: cards, page, limit });
+      : undefined;
+
+    const [cards, total] = await Promise.all([
+      prisma.businessCard.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { created_at: 'desc' },
+        select: {
+          id: true,
+          user_id: true,
+          full_name: true,
+          phone: true,
+          email: true,
+          company_name: true,
+          job_title: true,
+          logo_url: true,
+          description: true,
+          category: true,
+          services: true,
+          offer: true,
+          website: true,
+          business_hours: true,
+          location: true,
+          maps_link: true,
+          whatsapp: true,
+          telegram: true,
+          instagram: true,
+          facebook: true,
+          linkedin: true,
+          youtube: true,
+          twitter: true,
+          company_phone: true,
+          company_email: true,
+          company_address: true,
+          company_maps_link: true,
+          keywords: true,
+          established_year: true,
+          gender: true,
+          birthdate: true,
+          anniversary: true,
+          personal_country_code: true,
+          company_country_code: true,
+          company_photo: true,
+          about_business: true,
+          is_default: true,
+          company_website: true,
+          services_offered: true,
+          message: true,
+          created_at: true,
+          updated_at: true,
+        },
+      }),
+      prisma.businessCard.count({ where }),
+    ]);
+    res.json({ data: cards, page, limit, total });
+  } catch (err) {
+    console.error('[LIST-CARDS] Failed', err);
+    res.status(500).json({ error: 'Failed to list cards' });
+  }
 }
 
 export async function getCard(req: Request, res: Response): Promise<void> {
-  const id = paramInt(req.params.id);
-  const card = await prisma.businessCard.findUnique({
-    where: { id },
-    include: {
-      user: { select: { id: true, name: true, profile_picture: true } },
-      reviews: { take: 5, orderBy: { created_at: 'desc' } },
-      vouchers: { where: { status: 'active' }, take: 5 },
-    },
-  });
-  if (!card) { res.status(404).json({ error: 'Not found' }); return; }
-  res.json(card);
+  try {
+    const id = paramInt(req.params.id);
+    const card = await prisma.businessCard.findUnique({
+      where: { id },
+      include: {
+        user: { select: { id: true, name: true, profile_picture: true } },
+        reviews: { take: 5, orderBy: { created_at: 'desc' } },
+        vouchers: { where: { status: 'active' }, take: 5 },
+      },
+    });
+    if (!card) { res.status(404).json({ error: 'Not found' }); return; }
+    res.json(card);
+  } catch (err) {
+    console.error('[GET-CARD] Failed', err);
+    res.status(500).json({ error: 'Failed to get card' });
+  }
 }
 
 export async function createCard(req: AuthRequest, res: Response): Promise<void> {
-  const data = req.body;
-  const card = await prisma.businessCard.create({
-    data: { ...data, user_id: req.user!.userId },
-  });
+  try {
+    const data = pickCardFields(req.body);
+    const card = await prisma.businessCard.create({
+      data: { ...data, user_id: req.user!.userId } as any,
+    });
 
-  // Ensure user has business role
-  const existing = await prisma.userRole.findFirst({
-    where: { user_id: req.user!.userId, role: 'business' },
-  });
-  if (!existing) {
-    await prisma.userRole.create({ data: { user_id: req.user!.userId, role: 'business' } });
+    // Ensure user has business role
+    const existing = await prisma.userRole.findFirst({
+      where: { user_id: req.user!.userId, role: 'business' },
+    });
+    if (!existing) {
+      await prisma.userRole.create({ data: { user_id: req.user!.userId, role: 'business' } });
+    }
+
+    res.status(201).json(card);
+  } catch (err) {
+    console.error('[CREATE-CARD] Failed', err);
+    res.status(500).json({ error: 'Failed to create card' });
   }
-
-  res.status(201).json(card);
 }
 
 export async function updateCard(req: AuthRequest, res: Response): Promise<void> {
-  const id = paramInt(req.params.id);
-  const card = await prisma.businessCard.findUnique({ where: { id } });
-  if (!card) { res.status(404).json({ error: 'Not found' }); return; }
-  if (card.user_id !== req.user!.userId && !req.user!.roles.includes('admin')) {
-    res.status(403).json({ error: 'Forbidden' }); return;
+  try {
+    const id = paramInt(req.params.id);
+    const card = await prisma.businessCard.findUnique({ where: { id } });
+    if (!card) { res.status(404).json({ error: 'Not found' }); return; }
+    if (card.user_id !== req.user!.userId && !req.user!.roles.includes('admin')) {
+      res.status(403).json({ error: 'Forbidden' }); return;
+    }
+    const data = pickCardFields(req.body);
+    const updated = await prisma.businessCard.update({ where: { id }, data });
+    res.json(updated);
+  } catch (err) {
+    console.error('[UPDATE-CARD] Failed', err);
+    res.status(500).json({ error: 'Failed to update card' });
   }
-  const updated = await prisma.businessCard.update({ where: { id }, data: req.body });
-  res.json(updated);
 }
 
 export async function deleteCard(req: AuthRequest, res: Response): Promise<void> {
-  const id = paramInt(req.params.id);
-  const card = await prisma.businessCard.findUnique({ where: { id } });
-  if (!card) { res.status(404).json({ error: 'Not found' }); return; }
-  if (card.user_id !== req.user!.userId && !req.user!.roles.includes('admin')) {
-    res.status(403).json({ error: 'Forbidden' }); return;
+  try {
+    const id = paramInt(req.params.id);
+    const card = await prisma.businessCard.findUnique({ where: { id } });
+    if (!card) { res.status(404).json({ error: 'Not found' }); return; }
+    if (card.user_id !== req.user!.userId && !req.user!.roles.includes('admin')) {
+      res.status(403).json({ error: 'Forbidden' }); return;
+    }
+    await prisma.businessCard.delete({ where: { id } });
+    res.json({ message: 'Deleted' });
+  } catch (err) {
+    console.error('[DELETE-CARD] Failed', err);
+    res.status(500).json({ error: 'Failed to delete card' });
   }
-  await prisma.businessCard.delete({ where: { id } });
-  res.json({ message: 'Deleted' });
 }
 
 export async function getMyCards(req: AuthRequest, res: Response): Promise<void> {
-  const cards = await prisma.businessCard.findMany({
-    where: { user_id: req.user!.userId },
-    orderBy: { created_at: 'desc' },
-  });
-  res.json(cards);
+  try {
+    const cards = await prisma.businessCard.findMany({
+      where: { user_id: req.user!.userId },
+      orderBy: { created_at: 'desc' },
+    });
+    res.json(cards);
+  } catch (err) {
+    console.error('[MY-CARDS] Failed', err);
+    res.status(500).json({ error: 'Failed to get cards' });
+  }
 }
 
 export async function shareCard(req: AuthRequest, res: Response): Promise<void> {
-  const { card_id, recipient_user_id, message } = req.body;
-  const sender = await prisma.user.findUnique({ where: { id: req.user!.userId } });
-  const card = await prisma.businessCard.findUnique({ where: { id: parseInt(card_id) } });
-  if (!card || !sender) { res.status(404).json({ error: 'Card or sender not found' }); return; }
+  try {
+    const { card_id, recipient_user_id, message } = req.body;
+    const sender = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+    const card = await prisma.businessCard.findUnique({ where: { id: parseInt(card_id) } });
+    if (!card || !sender) { res.status(404).json({ error: 'Card or sender not found' }); return; }
 
-  const recipient = recipient_user_id
-    ? await prisma.user.findUnique({ where: { id: parseInt(recipient_user_id) } })
-    : null;
+    const recipient = recipient_user_id
+      ? await prisma.user.findUnique({ where: { id: parseInt(recipient_user_id) } })
+      : null;
 
-  const share = await prisma.sharedCard.create({
-    data: {
-      card_id: card.id,
-      sender_id: String(sender.id),
-      recipient_id: recipient ? String(recipient.id) : '0',
-      message: message || null,
-      card_title: card.company_name || card.full_name,
-      sender_name: sender.name || sender.phone,
-      recipient_name: recipient?.name || recipient?.phone || 'Unknown',
-      card_photo: card.company_photo || card.logo_url,
-      sender_profile_picture: sender.profile_picture,
-    },
-  });
-  res.status(201).json(share);
+    const share = await prisma.sharedCard.create({
+      data: {
+        card_id: card.id,
+        sender_id: String(sender.id),
+        recipient_id: recipient ? String(recipient.id) : '0',
+        message: message || null,
+        card_title: card.company_name || card.full_name,
+        sender_name: sender.name || sender.phone,
+        recipient_name: recipient?.name || recipient?.phone || 'Unknown',
+        card_photo: card.company_photo || card.logo_url,
+        sender_profile_picture: sender.profile_picture,
+      },
+    });
+    res.status(201).json(share);
+  } catch (err) {
+    console.error('[SHARE-CARD] Failed', err);
+    res.status(500).json({ error: 'Failed to share card' });
+  }
 }
 
 export async function getSharedCards(req: AuthRequest, res: Response): Promise<void> {
-  const userId = String(req.user!.userId);
-  const shares = await prisma.sharedCard.findMany({
-    where: { OR: [{ recipient_id: userId }, { sender_id: userId }] },
-    include: { card: true },
-    orderBy: { created_at: 'desc' },
-  });
-  res.json(shares);
+  try {
+    const userId = String(req.user!.userId);
+    const shares = await prisma.sharedCard.findMany({
+      where: { OR: [{ recipient_id: userId }, { sender_id: userId }] },
+      include: { card: true },
+      orderBy: { created_at: 'desc' },
+    });
+    res.json(shares);
+  } catch (err) {
+    console.error('[SHARED-CARDS] Failed', err);
+    res.status(500).json({ error: 'Failed to get shared cards' });
+  }
 }

@@ -16,7 +16,7 @@ export function signAccessToken(payload: JwtPayload): string {
 }
 
 export function signRefreshToken(payload: JwtPayload): string {
-  return jwt.sign(payload, REFRESH_SECRET, { expiresIn: REFRESH_EXPIRES } as any);
+  return jwt.sign({ ...payload, jti: crypto.randomUUID() }, REFRESH_SECRET, { expiresIn: REFRESH_EXPIRES } as any);
 }
 
 export function verifyAccessToken(token: string): JwtPayload {

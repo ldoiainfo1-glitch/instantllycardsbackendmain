@@ -21,6 +21,7 @@ const TS = Date.now().toString().slice(-7);
 const TEST_PHONE = `+9199${TS}0`;
 const TEST_PHONE_BIZ = `+9199${TS}1`;
 const TEST_PHONE_PROMO = `+9199${TS}2`;
+const TEST_PHONE_PWD = `+9199${TS}3`;
 const NORMALIZED_PHONE = normalizePhone(TEST_PHONE);
 const TEST_PASSWORD = 'Test@1234';
 
@@ -30,7 +31,7 @@ let refreshToken: string;
 afterAll(async () => {
   // Cleanup test users
   await prisma.user.deleteMany({
-    where: { phone: { in: [normalizePhone(TEST_PHONE), normalizePhone(TEST_PHONE_BIZ), normalizePhone(TEST_PHONE_PROMO)] } },
+    where: { phone: { in: [normalizePhone(TEST_PHONE), normalizePhone(TEST_PHONE_BIZ), normalizePhone(TEST_PHONE_PROMO), normalizePhone(TEST_PHONE_PWD)] } },
   });
   await prisma.$disconnect();
 });
@@ -190,5 +191,99 @@ describe('GET /api/auth/me', () => {
   it('returns 401 without token', async () => {
     const res = await request(app).get('/api/auth/me');
     expect(res.status).toBe(401);
+  });
+});
+
+// ─── CHANGE PASSWORD ──────────────────────────────────────────────────────
+describe('POST /api/auth/change-password', () => {
+  let pwdToken: string;
+
+  beforeAll(async () => {
+    const res = await request(app).post('/api/auth/signup').send({
+      phone: TEST_PHONE_PWD,
+      password: TEST_PASSWORD,
+      name: 'Password Test',
+    });
+    pwdToken = res.body.accessToken;
+  });
+
+  it('changes password with correct current password', async () => {
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${pwdToken}`)
+      .send({ currentPassword: TEST_PASSWORD, newPassword: 'NewPass@123' });
+    expect(res.status).toBe(200);
+
+    // Verify login with new password works
+    const login = await request(app).post('/api/auth/login').send({
+      phone: TEST_PHONE_PWD,
+      password: 'NewPass@123',
+    });
+    expect(login.status).toBe(200);
+    pwdToken = login.body.accessToken;
+  });
+
+  it('rejects wrong current password', async () => {
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${pwdToken}`)
+      .send({ currentPassword: 'WrongPass', newPassword: 'Another@123' });
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects too-short new password', async () => {
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${pwdToken}`)
+      .send({ currentPassword: 'NewPass@123', newPassword: 'ab' });
+    expect(res.status).toBe(422);
+  });
+});
+
+// ─── LOGOUT ─────────────────────────────────────────────────────────────────
+describe('POST /api/auth/logout', () => {
+  it('requires refreshToken in body', async () => {
+    const res = await request(app)
+      .post('/api/auth/logout')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('logs out successfully', async () => {
+    // Get a fresh login for this test
+    const login = await request(app).post('/api/auth/login').send({
+      phone: TEST_PHONE,
+      password: TEST_PASSWORD,
+    });
+    const res = await request(app)
+      .post('/api/auth/logout')
+      .set('Authorization', `Bearer ${login.body.accessToken}`)
+      .send({ refreshToken: login.body.refreshToken });
+    expect(res.status).toBe(200);
+    expect(res.body.message).toBe('Logged out');
+  });
+});
+
+// ─── REFRESH TOKEN ROTATION ─────────────────────────────────────────────────
+describe('Refresh token rotation', () => {
+  it('old refresh token no longer works after rotation', async () => {
+    const login = await request(app).post('/api/auth/login').send({
+      phone: TEST_PHONE,
+      password: TEST_PASSWORD,
+    });
+    expect(login.status).toBe(200);
+    const oldRefresh = login.body.refreshToken;
+    expect(oldRefresh).toBeDefined();
+
+    // Use the refresh token — should succeed and return new tokens
+    const rotated = await request(app).post('/api/auth/refresh').send({ refreshToken: oldRefresh });
+    expect(rotated.status).toBe(200);
+    expect(rotated.body.refreshToken).toBeDefined();
+    expect(rotated.body.refreshToken).not.toBe(oldRefresh);
+
+    // Old token should now be invalid (hash deleted from DB)
+    const reuse = await request(app).post('/api/auth/refresh').send({ refreshToken: oldRefresh });
+    expect([401, 403]).toContain(reuse.status);
   });
 });
