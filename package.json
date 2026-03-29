@@ -8,6 +8,7 @@
         "build": "tsc",
         "start": "node dist/index.js",
         "test": "jest --runInBand --forceExit",
+        "seed": "ts-node src/scripts/seed.ts",
         "assign:roles": "ts-node src/scripts/assignRoles.ts",
         "clean:phones": "ts-node src/scripts/cleanPhones.ts",
         "migrate:mongo": "ts-node src/scripts/migrate.ts",

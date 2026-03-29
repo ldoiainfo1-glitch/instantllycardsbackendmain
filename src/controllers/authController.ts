@@ -88,6 +88,15 @@ export async function signup(req: Request, res: Response): Promise<void> {
         roles,
       },
     });
+      refreshToken: result.refreshToken,
+      user: {
+        id: result.user.id,
+        phone: result.user.phone,
+        email: result.user.email,
+        name: result.user.name,
+        roles,
+      },
+    });
   } catch (err: any) {
     if (err?.code === 'P2002') {
       warn(`[SIGNUP] Conflict (unique constraint) — ${normalizedPhone ?? email}`);

@@ -180,16 +180,14 @@ export async function deleteCard(req: AuthRequest, res: Response): Promise<void>
 }
 
 export async function getMyCards(req: AuthRequest, res: Response): Promise<void> {
-  try {
-    const cards = await prisma.businessCard.findMany({
-      where: { user_id: req.user!.userId },
-      orderBy: { created_at: 'desc' },
-    });
-    res.json(cards);
-  } catch (err) {
-    console.error('[MY-CARDS] Failed', err);
-    res.status(500).json({ error: 'Failed to get cards' });
-  }
+  console.log(`[getMyCards] userId: ${req.user!.userId}`);
+  const cards = await prisma.businessCard.findMany({
+    where: { user_id: req.user!.userId },
+    orderBy: { created_at: 'desc' },
+  });
+  console.log(`[getMyCards] Found ${cards.length} cards for user ${req.user!.userId}`);
+  console.log(`[getMyCards] Card IDs: ${cards.map(c => c.id).join(', ')}`);
+  res.json(cards);
 }
 
 export async function shareCard(req: AuthRequest, res: Response): Promise<void> {
