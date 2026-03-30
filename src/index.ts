@@ -13,6 +13,7 @@ import voucherRoutes from './routes/vouchers';
 import adRoutes from './routes/ads';
 import reviewRoutes from './routes/reviews';
 import adminRoutes from './routes/admin';
+import uploadRoutes from './routes/uploads';
 
 const app = express();
 const httpServer = createServer(app);
@@ -40,6 +41,7 @@ app.use('/api/vouchers', voucherRoutes);
 app.use('/api/ads', adRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/uploads', uploadRoutes);
 
 // Socket.IO
 io.on('connection', (socket) => {
