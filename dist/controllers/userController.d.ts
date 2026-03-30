@@ -1,0 +1,8 @@
+import { Response } from 'express';
+import { AuthRequest } from '../middleware/auth';
+export declare function getProfile(req: AuthRequest, res: Response): Promise<void>;
+export declare function updateProfile(req: AuthRequest, res: Response): Promise<void>;
+export declare function getUserById(req: AuthRequest, res: Response): Promise<void>;
+export declare function getUserLocation(req: AuthRequest, res: Response): Promise<void>;
+export declare function upsertUserLocation(req: AuthRequest, res: Response): Promise<void>;
+export declare function deleteMe(req: AuthRequest, res: Response): Promise<void>;
