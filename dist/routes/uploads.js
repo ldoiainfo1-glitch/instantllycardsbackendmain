@@ -21,13 +21,14 @@ const upload = (0, multer_1.default)({
         }
     },
 });
+// ─── Business logo upload ───────────────────────────────────────────────────
 router.post('/image', auth_1.authenticate, upload.single('file'), async (req, res) => {
     try {
         if (!req.file) {
             res.status(400).json({ error: 'No file provided' });
             return;
         }
-        const userId = req.userId;
+        const userId = req.user?.userId || req.userId;
         const ext = req.file.originalname?.split('.').pop() || 'jpg';
         const key = `business-logos/${userId}/${Date.now()}.${ext}`;
         const url = await (0, s3_1.uploadToS3)(req.file.buffer, key, req.file.mimetype);
@@ -35,6 +36,25 @@ router.post('/image', auth_1.authenticate, upload.single('file'), async (req, re
     }
     catch (err) {
         console.error('[Upload] S3 upload failed:', err.message);
+        res.status(500).json({ error: 'Upload failed' });
+    }
+});
+// ─── Ad creative upload ─────────────────────────────────────────────────────
+router.post('/ad-creative', auth_1.authenticate, upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            res.status(400).json({ error: 'No file provided' });
+            return;
+        }
+        const userId = req.user.userId;
+        const ext = req.file.originalname?.split('.').pop() || 'jpg';
+        const rand = Math.random().toString(36).slice(2, 8);
+        const key = `ad-creatives/${userId}/${Date.now()}-${rand}.${ext}`;
+        const url = await (0, s3_1.uploadToS3)(req.file.buffer, key, req.file.mimetype);
+        res.json({ url });
+    }
+    catch (err) {
+        console.error('[Upload] Ad creative upload failed:', err.message);
         res.status(500).json({ error: 'Upload failed' });
     }
 });
