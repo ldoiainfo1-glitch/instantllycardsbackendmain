@@ -4,4 +4,13 @@ export declare function getDashboardCounts(_req: AuthRequest, res: Response): Pr
 export declare function getPendingPromotions(req: AuthRequest, res: Response): Promise<void>;
 export declare function approvePromotion(req: AuthRequest, res: Response): Promise<void>;
 export declare function rejectPromotion(req: AuthRequest, res: Response): Promise<void>;
+export declare function listAdCampaigns(req: AuthRequest, res: Response): Promise<void>;
+export declare function approveAdCampaign(req: AuthRequest, res: Response): Promise<void>;
+export declare function rejectAdCampaign(req: AuthRequest, res: Response): Promise<void>;
 export declare function listUsers(req: AuthRequest, res: Response): Promise<void>;
+export declare function listBusinesses(req: AuthRequest, res: Response): Promise<void>;
+export declare function approveBusinessCard(req: AuthRequest, res: Response): Promise<void>;
+export declare function rejectBusinessCard(req: AuthRequest, res: Response): Promise<void>;
+export declare function listEvents(_req: AuthRequest, res: Response): Promise<void>;
+export declare function listVouchers(_req: AuthRequest, res: Response): Promise<void>;
+export declare function listReviews(_req: AuthRequest, res: Response): Promise<void>;

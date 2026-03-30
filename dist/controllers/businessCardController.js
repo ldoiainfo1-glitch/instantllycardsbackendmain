@@ -22,6 +22,7 @@ const CARD_FIELDS = [
     'facebook', 'linkedin', 'youtube', 'twitter', 'keywords', 'offer', 'services',
     'personal_country_code', 'company_country_code', 'company_photo', 'about_business',
     'is_default', 'company_website', 'message', 'services_offered',
+    'is_live', 'latitude', 'longitude', 'service_mode', 'home_service',
 ];
 function pickCardFields(body) {
     const result = {};
@@ -43,15 +44,36 @@ async function listCards(req, res) {
         const page = (0, params_1.queryInt)(req.query.page, 1);
         const limit = (0, params_1.queryInt)(req.query.limit, 20);
         const search = (0, params_1.queryStr)(req.query.search);
-        const where = search
-            ? {
-                OR: [
-                    { full_name: { contains: search, mode: 'insensitive' } },
-                    { company_name: { contains: search, mode: 'insensitive' } },
-                    { category: { contains: search, mode: 'insensitive' } },
-                ],
-            }
-            : undefined;
+        const category = (0, params_1.queryStr)(req.query.category);
+        const approvalStatus = (0, params_1.queryStr)(req.query.approval_status);
+        const isLive = req.query.is_live;
+        const where = {};
+        // Only show approved + live cards by default (public listing)
+        if (approvalStatus) {
+            where.approval_status = approvalStatus;
+        }
+        else {
+            where.approval_status = 'approved';
+        }
+        if (isLive === 'true') {
+            where.is_live = true;
+        }
+        else if (isLive === 'false') {
+            where.is_live = false;
+        }
+        else {
+            where.is_live = true; // Default: only show live cards
+        }
+        if (category) {
+            where.category = { contains: category, mode: 'insensitive' };
+        }
+        if (search) {
+            where.OR = [
+                { full_name: { contains: search, mode: 'insensitive' } },
+                { company_name: { contains: search, mode: 'insensitive' } },
+                { category: { contains: search, mode: 'insensitive' } },
+            ];
+        }
         const [cards, total] = await Promise.all([
             prisma_1.default.businessCard.findMany({
                 where,
@@ -96,6 +118,11 @@ async function listCards(req, res) {
                     company_photo: true,
                     about_business: true,
                     is_default: true,
+                    approval_status: true,
+                    is_live: true,
+                    latitude: true,
+                    longitude: true,
+                    service_mode: true,
                     company_website: true,
                     services_offered: true,
                     message: true,
@@ -138,7 +165,7 @@ async function createCard(req, res) {
     try {
         const data = pickCardFields(req.body);
         const card = await prisma_1.default.businessCard.create({
-            data: { ...data, user_id: req.user.userId },
+            data: { ...data, user_id: req.user.userId, approval_status: 'pending' },
         });
         // Ensure user has business role
         const existing = await prisma_1.default.userRole.findFirst({

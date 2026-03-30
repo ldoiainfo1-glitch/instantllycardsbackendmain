@@ -12,6 +12,7 @@ const CARD_FIELDS = [
   'facebook', 'linkedin', 'youtube', 'twitter', 'keywords', 'offer', 'services',
   'personal_country_code', 'company_country_code', 'company_photo', 'about_business',
   'is_default', 'company_website', 'message', 'services_offered',
+  'is_live', 'latitude', 'longitude', 'service_mode', 'home_service',
 ] as const;
 
 function pickCardFields(body: Record<string, any>): Record<string, any> {
@@ -34,16 +35,37 @@ export async function listCards(req: Request, res: Response): Promise<void> {
     const page = queryInt(req.query.page, 1);
     const limit = queryInt(req.query.limit, 20);
     const search = queryStr(req.query.search);
+    const category = queryStr(req.query.category);
+    const approvalStatus = queryStr(req.query.approval_status);
+    const isLive = req.query.is_live;
 
-    const where = search
-      ? {
-          OR: [
-            { full_name: { contains: search, mode: 'insensitive' as const } },
-            { company_name: { contains: search, mode: 'insensitive' as const } },
-            { category: { contains: search, mode: 'insensitive' as const } },
-          ],
-        }
-      : undefined;
+    const where: any = {};
+
+    // Only show approved + live cards by default (public listing)
+    if (approvalStatus) {
+      where.approval_status = approvalStatus;
+    } else {
+      where.approval_status = 'approved';
+    }
+    if (isLive === 'true') {
+      where.is_live = true;
+    } else if (isLive === 'false') {
+      where.is_live = false;
+    } else {
+      where.is_live = true; // Default: only show live cards
+    }
+
+    if (category) {
+      where.category = { contains: category, mode: 'insensitive' };
+    }
+
+    if (search) {
+      where.OR = [
+        { full_name: { contains: search, mode: 'insensitive' as const } },
+        { company_name: { contains: search, mode: 'insensitive' as const } },
+        { category: { contains: search, mode: 'insensitive' as const } },
+      ];
+    }
 
     const [cards, total] = await Promise.all([
       prisma.businessCard.findMany({
@@ -89,6 +111,11 @@ export async function listCards(req: Request, res: Response): Promise<void> {
           company_photo: true,
           about_business: true,
           is_default: true,
+          approval_status: true,
+          is_live: true,
+          latitude: true,
+          longitude: true,
+          service_mode: true,
           company_website: true,
           services_offered: true,
           message: true,
@@ -128,7 +155,7 @@ export async function createCard(req: AuthRequest, res: Response): Promise<void>
   try {
     const data = pickCardFields(req.body);
     const card = await prisma.businessCard.create({
-      data: { ...data, user_id: req.user!.userId } as any,
+      data: { ...data, user_id: req.user!.userId, approval_status: 'pending' } as any,
     });
 
     // Ensure user has business role

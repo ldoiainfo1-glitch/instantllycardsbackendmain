@@ -154,6 +154,7 @@ model User {
   vouchers_created    Voucher[] @relation("VoucherAdmin")
   vouchers_transferred_from Voucher[] @relation("VoucherTransferredFrom")
   refresh_tokens RefreshToken[] @relation("UserRefreshTokens")
+  ad_campaigns   AdCampaign[] @relation("UserAdCampaigns")
 
   referred_by   User? @relation("UserReferrals", fields: [referred_by_id], references: [id], onDelete: SetNull)
   referred_users User[] @relation("UserReferrals")
@@ -240,6 +241,11 @@ model BusinessCard {
   keywords         String?
   established_year String?
   is_default       Boolean  @default(false)
+  approval_status  String   @default("pending")
+  is_live          Boolean  @default(true)
+  latitude         Float?
+  longitude        Float?
+  service_mode     String?
   created_at       DateTime @default(now())
   updated_at       DateTime @updatedAt
 
@@ -250,6 +256,7 @@ model BusinessCard {
   events             Event[]
   favorites          Favorite[]
   ads                Ad[]
+  ad_campaigns       AdCampaign[] @relation("BusinessCardAdCampaigns")
   leads              Lead[]
   card_analytics     CardAnalytic[]
   business_locations BusinessLocation[]
@@ -1547,4 +1554,52 @@ model VoucherTransferLog {
   voucher Voucher @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
   from_user User? @relation("VoucherTransferLogFrom", fields: [from_user_id], references: [id], onDelete: SetNull)
   to_user   User? @relation("VoucherTransferLogTo", fields: [to_user_id], references: [id], onDelete: SetNull)
+}
+
+// Ad Campaigns (new system — targeting, budgets, A/B variants)
+model AdCampaign {
+  id                Int       @id @default(autoincrement())
+  user_id           Int
+  business_card_id  Int?
+  title             String
+  description       String?
+  ad_type           String    @default("banner")
+  cta               String?
+  creative_url      String?
+  creative_urls     String[]  @default([])
+  target_city       String?
+  target_age        String?
+  target_interests  String?
+  daily_budget      Float     @default(100)
+  duration_days     Int       @default(7)
+  total_budget      Float?
+  impressions       Int       @default(0)
+  clicks            Int       @default(0)
+  spent             Float     @default(0)
+  status            String    @default("active")
+  approval_status   String    @default("pending")
+  start_date        DateTime  @default(now())
+  end_date          DateTime?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  user     User          @relation("UserAdCampaigns", fields: [user_id], references: [id], onDelete: Cascade)
+  business BusinessCard? @relation("BusinessCardAdCampaigns", fields: [business_card_id], references: [id], onDelete: SetNull)
+  variants AdVariant[]
+
+  @@map("ad_campaigns")
+}
+
+model AdVariant {
+  id           Int      @id @default(autoincrement())
+  campaign_id  Int
+  creative_url String
+  label        String
+  impressions  Int      @default(0)
+  clicks       Int      @default(0)
+  created_at   DateTime @default(now())
+
+  campaign AdCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+
+  @@map("ad_variants")
 }
