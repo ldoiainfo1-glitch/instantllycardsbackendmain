@@ -1,0 +1,10 @@
+import { Request, Response } from 'express';
+import { AuthRequest } from '../middleware/auth';
+export declare function listEvents(req: Request, res: Response): Promise<void>;
+export declare function getEvent(req: Request, res: Response): Promise<void>;
+export declare function listMyEvents(req: AuthRequest, res: Response): Promise<void>;
+export declare function createEvent(req: AuthRequest, res: Response): Promise<void>;
+export declare function updateEvent(req: AuthRequest, res: Response): Promise<void>;
+export declare function registerForEvent(req: AuthRequest, res: Response): Promise<void>;
+export declare function getEventRegistrations(req: AuthRequest, res: Response): Promise<void>;
+export declare function getMyRegistrations(req: AuthRequest, res: Response): Promise<void>;

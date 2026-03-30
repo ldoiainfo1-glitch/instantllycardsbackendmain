@@ -14,6 +14,8 @@ import adRoutes from './routes/ads';
 import reviewRoutes from './routes/reviews';
 import adminRoutes from './routes/admin';
 import uploadRoutes from './routes/uploads';
+import bookingRoutes from './routes/bookings';
+import eventRoutes from './routes/events';
 
 const app = express();
 const httpServer = createServer(app);
@@ -42,6 +44,8 @@ app.use('/api/ads', adRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/uploads', uploadRoutes);
+app.use('/api/bookings', bookingRoutes);
+app.use('/api/events', eventRoutes);
 
 // Socket.IO
 io.on('connection', (socket) => {

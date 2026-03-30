@@ -434,6 +434,7 @@ model EventRegistration {
   event_id      Int
   user_id       Int
   ticket_count  Int      @default(1)
+  qr_code       String?
   registered_at DateTime @default(now())
 
   event Event @relation(fields: [event_id], references: [id], onDelete: Cascade)
