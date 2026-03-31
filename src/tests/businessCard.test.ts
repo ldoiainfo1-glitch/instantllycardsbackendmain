@@ -165,7 +165,7 @@ describe('GET /api/cards (list)', () => {
   });
 
   it('supports search query', async () => {
-    const res = await request(app).get('/api/cards?search=Test%20Co');
+    const res = await request(app).get('/api/cards?search=Test%20Co&approval_status=pending');
     expect(res.status).toBe(200);
     expect(res.body.data.length).toBeGreaterThan(0);
     expect(res.body.data[0].company_name).toBe('Test Co');
@@ -190,7 +190,7 @@ describe('GET /api/cards (list)', () => {
   });
 
   it('includes new fields in listed cards', async () => {
-    const res = await request(app).get('/api/cards?search=New%20Fields%20User');
+    const res = await request(app).get('/api/cards?search=New%20Fields%20User&approval_status=pending');
     expect(res.status).toBe(200);
     expect(res.body.data.length).toBeGreaterThan(0);
     const card = res.body.data[0];
