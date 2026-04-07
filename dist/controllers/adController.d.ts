@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 export declare function listAds(req: Request, res: Response): Promise<void>;
+export declare function getMyAds(req: AuthRequest, res: Response): Promise<void>;
 export declare function getMyCampaigns(req: AuthRequest, res: Response): Promise<void>;
 export declare function getCampaign(req: AuthRequest, res: Response): Promise<void>;
 export declare function createCampaign(req: AuthRequest, res: Response): Promise<void>;
@@ -11,4 +12,3 @@ export declare function trackClick(req: AuthRequest, res: Response): Promise<voi
 export declare function getCampaignAnalytics(req: AuthRequest, res: Response): Promise<void>;
 export declare function getCampaignVariants(req: AuthRequest, res: Response): Promise<void>;
 export declare function listLegacyAds(_req: Request, res: Response): Promise<void>;
-export declare function getMyAds(req: AuthRequest, res: Response): Promise<void>;

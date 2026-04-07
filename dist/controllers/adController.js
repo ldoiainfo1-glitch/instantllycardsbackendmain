@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.listAds = listAds;
+exports.getMyAds = getMyAds;
 exports.getMyCampaigns = getMyCampaigns;
 exports.getCampaign = getCampaign;
 exports.createCampaign = createCampaign;
@@ -14,7 +15,6 @@ exports.trackClick = trackClick;
 exports.getCampaignAnalytics = getCampaignAnalytics;
 exports.getCampaignVariants = getCampaignVariants;
 exports.listLegacyAds = listLegacyAds;
-exports.getMyAds = getMyAds;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const params_1 = require("../utils/params");
 const params_2 = require("../utils/params");
@@ -32,13 +32,58 @@ function pickCampaignFields(body) {
     }
     return out;
 }
-// ─── List active campaigns (public delivery endpoint) ───────────────────────
+/**
+ * Normalize Ad table record to unified format
+ */
+function normalizeLeacyAd(ad) {
+    return {
+        id: ad.id,
+        title: ad.title,
+        description: ad.description,
+        image_url: ad.bottom_image || ad.bottom_image_s3_url,
+        cta_url: ad.cta_url,
+        ad_type: ad.ad_type_legacy || ad.ad_type || 'banner',
+        status: ad.status,
+        approval_status: ad.approval_status,
+        phone_number: ad.phone_number,
+        priority: ad.priority,
+        start_date: ad.start_date,
+        end_date: ad.end_date,
+        business: ad.business,
+        impressions: ad.impressions,
+        clicks: ad.clicks,
+        source: 'legacy',
+    };
+}
+/**
+ * Normalize AdCampaign table record to unified format
+ */
+function normalizeCampaign(campaign) {
+    return {
+        id: campaign.id,
+        title: campaign.title,
+        description: campaign.description,
+        image_url: campaign.creative_url,
+        cta_url: campaign.cta,
+        ad_type: campaign.ad_type,
+        status: campaign.status,
+        approval_status: campaign.approval_status,
+        start_date: campaign.start_date,
+        end_date: campaign.end_date,
+        business: campaign.business,
+        impressions: campaign.impressions,
+        clicks: campaign.clicks,
+        source: 'campaign',
+    };
+}
+// ─── List ads (unified: campaigns + legacy fallback) ──────────────────────
 async function listAds(req, res) {
     try {
         const adType = (0, params_2.queryStr)(req.query.ad_type);
         const city = (0, params_2.queryStr)(req.query.city);
         const limit = (0, params_2.queryInt)(req.query.limit, 50);
-        const where = {
+        // Get campaigns (new system)
+        const campaignWhere = {
             status: 'active',
             approval_status: 'approved',
             OR: [
@@ -47,23 +92,83 @@ async function listAds(req, res) {
             ],
         };
         if (adType)
-            where.ad_type = adType;
+            campaignWhere.ad_type = adType;
         if (city)
-            where.target_city = { contains: city, mode: 'insensitive' };
+            campaignWhere.target_city = { contains: city, mode: 'insensitive' };
         const campaigns = await prisma_1.default.adCampaign.findMany({
-            where,
+            where: campaignWhere,
             orderBy: [{ daily_budget: 'desc' }, { created_at: 'desc' }],
             include: { business: { select: { id: true, company_name: true, logo_url: true } } },
             take: limit,
         });
-        res.json(campaigns);
+        // If no campaigns, fall back to legacy ads
+        let results = campaigns.map(normalizeCampaign);
+        if (results.length === 0) {
+            console.log('[listAds] No campaigns found, falling back to legacy Ad table');
+            const legacyWhere = {
+                status: 'active',
+                OR: [
+                    { end_date: null },
+                    { end_date: { gte: new Date() } },
+                ],
+            };
+            if (adType)
+                legacyWhere.ad_type_legacy = adType;
+            const legacyAds = await prisma_1.default.ad.findMany({
+                where: legacyWhere,
+                orderBy: [{ priority: 'desc' }, { created_at: 'desc' }],
+                include: { business: { select: { id: true, company_name: true, logo_url: true } } },
+                take: limit,
+            });
+            results = legacyAds.map(normalizeLeacyAd);
+        }
+        res.json(results);
     }
     catch (err) {
         console.error('[listAds] error:', err);
         res.status(500).json({ error: 'Failed to list ads' });
     }
 }
-// ─── Get my campaigns ───────────────────────────────────────────────────────
+// ─── Get my ads (unified: campaigns + legacy fallback) ────────────────────
+async function getMyAds(req, res) {
+    try {
+        // NEW SYSTEM: Get my campaigns
+        const campaigns = await prisma_1.default.adCampaign.findMany({
+            where: { user_id: req.user.userId },
+            include: {
+                business: { select: { id: true, company_name: true, logo_url: true } },
+                variants: true,
+            },
+            orderBy: { created_at: 'desc' },
+        });
+        // LEGACY: Get my ads (fallback)
+        const cards = await prisma_1.default.businessCard.findMany({
+            where: { user_id: req.user.userId },
+            select: { id: true },
+        });
+        const cardIds = cards.map((c) => c.id);
+        const legacyAds = await prisma_1.default.ad.findMany({
+            where: { business_id: { in: cardIds } },
+            include: { business: { select: { id: true, company_name: true, logo_url: true } } },
+            orderBy: { created_at: 'desc' },
+        });
+        // Combine and normalize
+        const results = [
+            ...campaigns.map(normalizeCampaign),
+            ...legacyAds.map(normalizeLeacyAd),
+        ].sort((a, b) => {
+            const aDate = a.start_date || new Date(0);
+            const bDate = b.start_date || new Date(0);
+            return bDate.getTime() - aDate.getTime();
+        });
+        res.json(results);
+    }
+    catch (err) {
+        console.error('[getMyAds] error:', err);
+        res.status(500).json({ error: 'Failed to fetch ads' });
+    }
+}
+// ─── Get my campaigns (new system only) ───────────────────────────────────
 async function getMyCampaigns(req, res) {
     try {
         // Auto-pause expired ads
@@ -362,9 +467,10 @@ async function getCampaignVariants(req, res) {
         res.status(500).json({ error: 'Failed to fetch variants' });
     }
 }
-// ─── Legacy: list old Ad model (for backward compat) ────────────────────────
+// ─── Legacy: list old Ad model (DEPRECATED - use listAds) ────────────────────
 async function listLegacyAds(_req, res) {
     try {
+        console.warn('[DEPRECATED] listLegacyAds() called. Use listAds() instead');
         const ads = await prisma_1.default.ad.findMany({
             where: { status: 'active' },
             orderBy: [{ priority: 'desc' }, { created_at: 'desc' }],
@@ -375,24 +481,6 @@ async function listLegacyAds(_req, res) {
     }
     catch (err) {
         res.status(500).json({ error: 'Failed to list ads' });
-    }
-}
-async function getMyAds(req, res) {
-    try {
-        const cards = await prisma_1.default.businessCard.findMany({
-            where: { user_id: req.user.userId },
-            select: { id: true },
-        });
-        const cardIds = cards.map((c) => c.id);
-        const ads = await prisma_1.default.ad.findMany({
-            where: { business_id: { in: cardIds } },
-            include: { business: { select: { id: true, company_name: true } } },
-            orderBy: { created_at: 'desc' },
-        });
-        res.json(ads);
-    }
-    catch (err) {
-        res.status(500).json({ error: 'Failed to fetch ads' });
     }
 }
 //# sourceMappingURL=adController.js.map

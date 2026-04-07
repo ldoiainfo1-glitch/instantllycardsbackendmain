@@ -20,74 +20,7 @@ function pickCampaignFields(body: Record<string, any>) {
   return out;
 }
 
-// ─── Unified Ad Response (works for both Ad and AdCampaign) ────────────────
-
-interface UnifiedAdResponse {
-  id: number;
-  title: string;
-  description?: string;
-  image_url?: string;
-  cta_url?: string;
-  ad_type: string;
-  status: string;
-  approval_status?: string;
-  phone_number?: string;
-  priority?: number;
-  start_date?: Date | null;
-  end_date?: Date | null;
-  business?: { id: number; company_name: string; logo_url?: string };
-  impressions?: number;
-  clicks?: number;
-  source: 'legacy' | 'campaign'; // Track which table it came from
-}
-
-/**
- * Normalize Ad table record to unified format
- */
-function normalizeLeacyAd(ad: any): UnifiedAdResponse {
-  return {
-    id: ad.id,
-    title: ad.title,
-    description: ad.description,
-    image_url: ad.bottom_image || ad.bottom_image_s3_url,
-    cta_url: ad.cta_url,
-    ad_type: ad.ad_type_legacy || ad.ad_type || 'banner',
-    status: ad.status,
-    approval_status: ad.approval_status,
-    phone_number: ad.phone_number,
-    priority: ad.priority,
-    start_date: ad.start_date,
-    end_date: ad.end_date,
-    business: ad.business,
-    impressions: ad.impressions,
-    clicks: ad.clicks,
-    source: 'legacy',
-  };
-}
-
-/**
- * Normalize AdCampaign table record to unified format
- */
-function normalizeCampaign(campaign: any): UnifiedAdResponse {
-  return {
-    id: campaign.id,
-    title: campaign.title,
-    description: campaign.description,
-    image_url: campaign.creative_url,
-    cta_url: campaign.cta,
-    ad_type: campaign.ad_type,
-    status: campaign.status,
-    approval_status: campaign.approval_status,
-    start_date: campaign.start_date,
-    end_date: campaign.end_date,
-    business: campaign.business,
-    impressions: campaign.impressions,
-    clicks: campaign.clicks,
-    source: 'campaign',
-  };
-}
-
-// ─── List ads (unified: campaigns + legacy fallback) ──────────────────────
+// ─── List active campaigns (public delivery endpoint) ───────────────────────
 
 export async function listAds(req: Request, res: Response): Promise<void> {
   try {
@@ -95,8 +28,7 @@ export async function listAds(req: Request, res: Response): Promise<void> {
     const city = queryStr(req.query.city);
     const limit = queryInt(req.query.limit, 50);
 
-    // Get campaigns (new system)
-    const campaignWhere: any = {
+    const where: any = {
       status: 'active',
       approval_status: 'approved',
       OR: [
@@ -104,92 +36,23 @@ export async function listAds(req: Request, res: Response): Promise<void> {
         { end_date: { gte: new Date() } },
       ],
     };
-    if (adType) campaignWhere.ad_type = adType;
-    if (city) campaignWhere.target_city = { contains: city, mode: 'insensitive' };
+    if (adType) where.ad_type = adType;
+    if (city) where.target_city = { contains: city, mode: 'insensitive' };
 
     const campaigns = await prisma.adCampaign.findMany({
-      where: campaignWhere,
+      where,
       orderBy: [{ daily_budget: 'desc' }, { created_at: 'desc' }],
       include: { business: { select: { id: true, company_name: true, logo_url: true } } },
       take: limit,
     });
-
-    // If no campaigns, fall back to legacy ads
-    let results: UnifiedAdResponse[] = campaigns.map(normalizeCampaign);
-
-    if (results.length === 0) {
-      console.log('[listAds] No campaigns found, falling back to legacy Ad table');
-      const legacyWhere: any = {
-        status: 'active',
-        OR: [
-          { end_date: null },
-          { end_date: { gte: new Date() } },
-        ],
-      };
-      if (adType) legacyWhere.ad_type_legacy = adType;
-
-      const legacyAds = await prisma.ad.findMany({
-        where: legacyWhere,
-        orderBy: [{ priority: 'desc' }, { created_at: 'desc' }],
-        include: { business: { select: { id: true, company_name: true, logo_url: true } } },
-        take: limit,
-      });
-
-      results = legacyAds.map(normalizeLeacyAd);
-    }
-
-    res.json(results);
+    res.json(campaigns);
   } catch (err: any) {
     console.error('[listAds] error:', err);
     res.status(500).json({ error: 'Failed to list ads' });
   }
 }
 
-// ─── Get my ads (unified: campaigns + legacy fallback) ────────────────────
-
-export async function getMyAds(req: AuthRequest, res: Response): Promise<void> {
-  try {
-    // NEW SYSTEM: Get my campaigns
-    const campaigns = await prisma.adCampaign.findMany({
-      where: { user_id: req.user!.userId },
-      include: {
-        business: { select: { id: true, company_name: true, logo_url: true } },
-        variants: true,
-      },
-      orderBy: { created_at: 'desc' },
-    });
-
-    // LEGACY: Get my ads (fallback)
-    const cards = await prisma.businessCard.findMany({
-      where: { user_id: req.user!.userId },
-      select: { id: true },
-    });
-    const cardIds = cards.map((c) => c.id);
-
-    const legacyAds = await prisma.ad.findMany({
-      where: { business_id: { in: cardIds } },
-      include: { business: { select: { id: true, company_name: true, logo_url: true } } },
-      orderBy: { created_at: 'desc' },
-    });
-
-    // Combine and normalize
-    const results = [
-      ...campaigns.map(normalizeCampaign),
-      ...legacyAds.map(normalizeLeacyAd),
-    ].sort((a, b) => {
-      const aDate = a.start_date || new Date(0);
-      const bDate = b.start_date || new Date(0);
-      return bDate.getTime() - aDate.getTime();
-    });
-
-    res.json(results);
-  } catch (err: any) {
-    console.error('[getMyAds] error:', err);
-    res.status(500).json({ error: 'Failed to fetch ads' });
-  }
-}
-
-// ─── Get my campaigns (new system only) ───────────────────────────────────
+// ─── Get my campaigns ───────────────────────────────────────────────────────
 
 export async function getMyCampaigns(req: AuthRequest, res: Response): Promise<void> {
   try {
@@ -502,11 +365,10 @@ export async function getCampaignVariants(req: AuthRequest, res: Response): Prom
   }
 }
 
-// ─── Legacy: list old Ad model (DEPRECATED - use listAds) ────────────────────
+// ─── Legacy: list old Ad model (for backward compat) ────────────────────────
 
 export async function listLegacyAds(_req: Request, res: Response): Promise<void> {
   try {
-    console.warn('[DEPRECATED] listLegacyAds() called. Use listAds() instead');
     const ads = await prisma.ad.findMany({
       where: { status: 'active' },
       orderBy: [{ priority: 'desc' }, { created_at: 'desc' }],
@@ -516,5 +378,23 @@ export async function listLegacyAds(_req: Request, res: Response): Promise<void>
     res.json(ads);
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to list ads' });
+  }
+}
+
+export async function getMyAds(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const cards = await prisma.businessCard.findMany({
+      where: { user_id: req.user!.userId },
+      select: { id: true },
+    });
+    const cardIds = cards.map((c) => c.id);
+    const ads = await prisma.ad.findMany({
+      where: { business_id: { in: cardIds } },
+      include: { business: { select: { id: true, company_name: true } } },
+      orderBy: { created_at: 'desc' },
+    });
+    res.json(ads);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch ads' });
   }
 }
