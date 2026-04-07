@@ -18,6 +18,7 @@ exports.listLegacyAds = listLegacyAds;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const params_1 = require("../utils/params");
 const params_2 = require("../utils/params");
+const urlNormalizer_1 = require("../utils/urlNormalizer");
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const CAMPAIGN_FIELDS = [
     'title', 'description', 'ad_type', 'cta', 'creative_url', 'creative_urls',
@@ -122,7 +123,13 @@ async function listAds(req, res) {
             });
             results = legacyAds.map(normalizeLeacyAd);
         }
-        res.json(results);
+        // Normalize all URLs before returning
+        const normalizedResults = results.map((ad) => ({
+            ...ad,
+            image_url: (0, urlNormalizer_1.normalizeCreativeUrl)(ad.image_url),
+            cta_url: (0, urlNormalizer_1.normalizeCreativeUrl)(ad.cta_url),
+        }));
+        res.json(normalizedResults);
     }
     catch (err) {
         console.error('[listAds] error:', err);
@@ -161,7 +168,13 @@ async function getMyAds(req, res) {
             const bDate = b.start_date || new Date(0);
             return bDate.getTime() - aDate.getTime();
         });
-        res.json(results);
+        // Normalize all URLs
+        const normalized = results.map((ad) => ({
+            ...ad,
+            image_url: (0, urlNormalizer_1.normalizeCreativeUrl)(ad.image_url),
+            cta_url: (0, urlNormalizer_1.normalizeCreativeUrl)(ad.cta_url),
+        }));
+        res.json(normalized);
     }
     catch (err) {
         console.error('[getMyAds] error:', err);
@@ -188,7 +201,9 @@ async function getMyCampaigns(req, res) {
             },
             orderBy: { created_at: 'desc' },
         });
-        res.json(campaigns);
+        // Normalize URLs before returning
+        const normalized = (0, urlNormalizer_1.normalizeAdCampaignsResponse)(campaigns);
+        res.json(normalized);
     }
     catch (err) {
         console.error('[getMyCampaigns] error:', err);
@@ -210,7 +225,9 @@ async function getCampaign(req, res) {
             res.status(404).json({ error: 'Campaign not found' });
             return;
         }
-        res.json(campaign);
+        // Normalize URLs
+        const normalized = (0, urlNormalizer_1.normalizeAdCampaignResponse)(campaign);
+        res.json(normalized);
     }
     catch (err) {
         console.error('[getCampaign] error:', err);
@@ -426,8 +443,10 @@ async function getCampaignAnalytics(req, res) {
         const ctr = campaign.impressions > 0 ? (campaign.clicks / campaign.impressions) * 100 : 0;
         const cpc = campaign.clicks > 0 ? campaign.spent / campaign.clicks : 0;
         const budgetUsed = campaign.total_budget ? (campaign.spent / campaign.total_budget) * 100 : 0;
+        // Normalize campaign and variants
+        const normalizedCampaign = (0, urlNormalizer_1.normalizeAdCampaignResponse)(campaign);
         res.json({
-            campaign,
+            campaign: normalizedCampaign,
             analytics: {
                 impressions: campaign.impressions,
                 clicks: campaign.clicks,
@@ -439,7 +458,7 @@ async function getCampaignAnalytics(req, res) {
                 variants: campaign.variants.map((v) => ({
                     id: v.id,
                     label: v.label,
-                    creative_url: v.creative_url,
+                    creative_url: (0, urlNormalizer_1.normalizeCreativeUrl)(v.creative_url),
                     impressions: v.impressions,
                     clicks: v.clicks,
                     ctr: v.impressions > 0 ? parseFloat(((v.clicks / v.impressions) * 100).toFixed(2)) : 0,
@@ -460,7 +479,12 @@ async function getCampaignVariants(req, res) {
             where: { campaign_id: id },
             orderBy: { label: 'asc' },
         });
-        res.json(variants);
+        // Normalize all creative_urls
+        const normalized = variants.map((v) => ({
+            ...v,
+            creative_url: (0, urlNormalizer_1.normalizeCreativeUrl)(v.creative_url),
+        }));
+        res.json(normalized);
     }
     catch (err) {
         console.error('[getCampaignVariants] error:', err);
