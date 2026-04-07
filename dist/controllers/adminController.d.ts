@@ -7,6 +7,10 @@ export declare function rejectPromotion(req: AuthRequest, res: Response): Promis
 export declare function listAdCampaigns(req: AuthRequest, res: Response): Promise<void>;
 export declare function approveAdCampaign(req: AuthRequest, res: Response): Promise<void>;
 export declare function rejectAdCampaign(req: AuthRequest, res: Response): Promise<void>;
+export declare function getAdCampaignDetails(req: AuthRequest, res: Response): Promise<void>;
+export declare function pauseAdCampaign(req: AuthRequest, res: Response): Promise<void>;
+export declare function resumeAdCampaign(req: AuthRequest, res: Response): Promise<void>;
+export declare function deleteAdCampaign(req: AuthRequest, res: Response): Promise<void>;
 export declare function listUsers(req: AuthRequest, res: Response): Promise<void>;
 export declare function listBusinesses(req: AuthRequest, res: Response): Promise<void>;
 export declare function approveBusinessCard(req: AuthRequest, res: Response): Promise<void>;
