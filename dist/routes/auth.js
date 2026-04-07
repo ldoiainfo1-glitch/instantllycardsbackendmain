@@ -41,5 +41,18 @@ router.post('/change-password', auth_1.authenticate, [
     (0, express_validator_1.body)('currentPassword').notEmpty().withMessage('Current password required'),
     (0, express_validator_1.body)('newPassword').isLength({ min: 6 }).withMessage('New password must be at least 6 characters'),
 ], validate_1.validate, authController_1.changePassword);
+// Forgot password routes
+router.post('/forgot-password/send-otp', authRateLimit, [
+    (0, express_validator_1.body)('phone').notEmpty().withMessage('Phone number is required'),
+], validate_1.validate, authController_1.sendPasswordResetOTP);
+router.post('/forgot-password/verify-otp', authRateLimit, [
+    (0, express_validator_1.body)('phone').notEmpty().withMessage('Phone number is required'),
+    (0, express_validator_1.body)('otp').notEmpty().withMessage('OTP is required'),
+], validate_1.validate, authController_1.verifyPasswordResetOTP);
+router.post('/forgot-password/reset-password', authRateLimit, [
+    (0, express_validator_1.body)('phone').notEmpty().withMessage('Phone number is required'),
+    (0, express_validator_1.body)('otp').notEmpty().withMessage('OTP is required'),
+    (0, express_validator_1.body)('newPassword').isLength({ min: 6 }).withMessage('New password must be at least 6 characters'),
+], validate_1.validate, authController_1.resetPassword);
 exports.default = router;
 //# sourceMappingURL=auth.js.map

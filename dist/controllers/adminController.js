@@ -62,6 +62,14 @@ async function rejectPromotion(req, res) {
 // ─── Ad campaign management ─────────────────────────────────────────────────
 async function listAdCampaigns(req, res) {
     const status = req.query.approval_status;
+    // Auto-pause expired ads
+    await prisma_1.default.adCampaign.updateMany({
+        where: {
+            status: 'active',
+            end_date: { lt: new Date() }
+        },
+        data: { status: 'completed' }
+    });
     const where = {};
     if (status && status !== 'all')
         where.approval_status = status;

@@ -66,6 +66,15 @@ async function listAds(req, res) {
 // ─── Get my campaigns ───────────────────────────────────────────────────────
 async function getMyCampaigns(req, res) {
     try {
+        // Auto-pause expired ads
+        await prisma_1.default.adCampaign.updateMany({
+            where: {
+                user_id: req.user.userId,
+                status: 'active',
+                end_date: { lt: new Date() }
+            },
+            data: { status: 'completed' }
+        });
         const campaigns = await prisma_1.default.adCampaign.findMany({
             where: { user_id: req.user.userId },
             include: {
