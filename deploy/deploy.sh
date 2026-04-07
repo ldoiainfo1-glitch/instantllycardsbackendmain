@@ -78,22 +78,45 @@ npx prisma migrate deploy
 echo "Dependencies installed and migrations applied."
 REMOTE
 
-# Step 5: Set up Nginx (if not already done)
+# Step 5: Set up Nginx (preserve SSL if already configured)
 echo ""
 echo ">>> Step 5: Configuring Nginx..."
 "${SSH_CMD[@]}" << 'REMOTE'
-if [ ! -f /etc/nginx/sites-available/instantlly ]; then
+# Check if SSL certificate exists (certbot managed)
+SSL_CERT="/etc/letsencrypt/live/backend.instantllycards.com/fullchain.pem"
+
+if [ -f "$SSL_CERT" ]; then
+    echo "✅ SSL certificate found. Updating nginx config (preserving SSL)..."
+    # Update the config - it already has SSL paths
     sudo cp ~/nginx-instantlly.conf /etc/nginx/sites-available/instantlly
-    sudo ln -sf /etc/nginx/sites-available/instantlly /etc/nginx/sites-enabled/
-    sudo rm -f /etc/nginx/sites-enabled/default
     sudo nginx -t && sudo systemctl reload nginx
-    echo "Nginx configured."
+    echo "Nginx config updated with SSL preserved."
 else
+    echo "⚠️  SSL certificate not found. Setting up HTTP-only config (you'll need to run certbot after)..."
+    # Update the config anyway
     sudo cp ~/nginx-instantlly.conf /etc/nginx/sites-available/instantlly
     sudo nginx -t && sudo systemctl reload nginx
-    echo "Nginx config updated."
+    echo "Nginx configured. Run this to enable SSL:"
+    echo "  sudo certbot --nginx -d backend.instantllycards.com"
+fi
+
+# Ensure certbot renewal hook is set up
+if [ ! -d /etc/letsencrypt/renewal-hooks/post ]; then
+    sudo mkdir -p /etc/letsencrypt/renewal-hooks/post
+fi
+
+# Create renewal hook script to reload nginx after cert renewal
+if [ ! -f /etc/letsencrypt/renewal-hooks/post/nginx.sh ]; then
+    echo "Setting up certbot renewal hook..."
+    sudo bash -c 'cat > /etc/letsencrypt/renewal-hooks/post/nginx.sh << EOF
+#!/bin/bash
+systemctl reload nginx
+EOF'
+    sudo chmod +x /etc/letsencrypt/renewal-hooks/post/nginx.sh
+    echo "Renewal hook created - nginx will auto-reload on cert renewal."
 fi
 REMOTE
+
 
 # Step 6: Start/Restart PM2
 echo ""
