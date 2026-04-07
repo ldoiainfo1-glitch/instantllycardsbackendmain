@@ -3,6 +3,11 @@ import prisma from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { paramInt } from '../utils/params';
 import { queryInt, queryStr } from '../utils/params';
+import {
+  normalizeAdCampaignResponse,
+  normalizeAdCampaignsResponse,
+  normalizeCreativeUrl,
+} from '../utils/urlNormalizer';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -138,7 +143,14 @@ export async function listAds(req: Request, res: Response): Promise<void> {
       results = legacyAds.map(normalizeLeacyAd);
     }
 
-    res.json(results);
+    // Normalize all URLs before returning
+    const normalizedResults = results.map((ad) => ({
+      ...ad,
+      image_url: normalizeCreativeUrl(ad.image_url),
+      cta_url: normalizeCreativeUrl(ad.cta_url),
+    }));
+
+    res.json(normalizedResults);
   } catch (err: any) {
     console.error('[listAds] error:', err);
     res.status(500).json({ error: 'Failed to list ads' });
@@ -182,7 +194,14 @@ export async function getMyAds(req: AuthRequest, res: Response): Promise<void> {
       return bDate.getTime() - aDate.getTime();
     });
 
-    res.json(results);
+    // Normalize all URLs
+    const normalized = results.map((ad) => ({
+      ...ad,
+      image_url: normalizeCreativeUrl(ad.image_url),
+      cta_url: normalizeCreativeUrl(ad.cta_url),
+    }));
+
+    res.json(normalized);
   } catch (err: any) {
     console.error('[getMyAds] error:', err);
     res.status(500).json({ error: 'Failed to fetch ads' });
@@ -211,7 +230,10 @@ export async function getMyCampaigns(req: AuthRequest, res: Response): Promise<v
       },
       orderBy: { created_at: 'desc' },
     });
-    res.json(campaigns);
+
+    // Normalize URLs before returning
+    const normalized = normalizeAdCampaignsResponse(campaigns);
+    res.json(normalized);
   } catch (err: any) {
     console.error('[getMyCampaigns] error:', err);
     res.status(500).json({ error: 'Failed to fetch campaigns' });
@@ -231,7 +253,10 @@ export async function getCampaign(req: AuthRequest, res: Response): Promise<void
       },
     });
     if (!campaign) { res.status(404).json({ error: 'Campaign not found' }); return; }
-    res.json(campaign);
+
+    // Normalize URLs
+    const normalized = normalizeAdCampaignResponse(campaign);
+    res.json(normalized);
   } catch (err: any) {
     console.error('[getCampaign] error:', err);
     res.status(500).json({ error: 'Failed to fetch campaign' });
@@ -460,8 +485,11 @@ export async function getCampaignAnalytics(req: AuthRequest, res: Response): Pro
     const cpc = campaign.clicks > 0 ? campaign.spent / campaign.clicks : 0;
     const budgetUsed = campaign.total_budget ? (campaign.spent / campaign.total_budget) * 100 : 0;
 
+    // Normalize campaign and variants
+    const normalizedCampaign = normalizeAdCampaignResponse(campaign);
+
     res.json({
-      campaign,
+      campaign: normalizedCampaign,
       analytics: {
         impressions: campaign.impressions,
         clicks: campaign.clicks,
@@ -473,7 +501,7 @@ export async function getCampaignAnalytics(req: AuthRequest, res: Response): Pro
         variants: campaign.variants.map((v) => ({
           id: v.id,
           label: v.label,
-          creative_url: v.creative_url,
+          creative_url: normalizeCreativeUrl(v.creative_url),
           impressions: v.impressions,
           clicks: v.clicks,
           ctr: v.impressions > 0 ? parseFloat(((v.clicks / v.impressions) * 100).toFixed(2)) : 0,
@@ -495,7 +523,14 @@ export async function getCampaignVariants(req: AuthRequest, res: Response): Prom
       where: { campaign_id: id },
       orderBy: { label: 'asc' },
     });
-    res.json(variants);
+
+    // Normalize all creative_urls
+    const normalized = variants.map((v) => ({
+      ...v,
+      creative_url: normalizeCreativeUrl(v.creative_url),
+    }));
+
+    res.json(normalized);
   } catch (err: any) {
     console.error('[getCampaignVariants] error:', err);
     res.status(500).json({ error: 'Failed to fetch variants' });
