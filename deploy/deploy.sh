@@ -11,7 +11,7 @@ EC2_IP="${1:?Usage: deploy.sh <EC2_IP> <PEM_PATH>}"
 PEM_PATH="${2:?Usage: deploy.sh <EC2_IP> <PEM_PATH>}"
 USER="ubuntu"
 APP_DIR="/home/ubuntu/instantlly-backend"
-SSH_CMD="ssh -i $PEM_PATH -o StrictHostKeyChecking=no $USER@$EC2_IP"
+SSH_CMD=(ssh -i "$PEM_PATH" -o StrictHostKeyChecking=no "$USER@$EC2_IP")
 
 echo "=========================================="
 echo "  Deploying Instantlly Backend to EC2"
@@ -27,35 +27,35 @@ echo "Build complete."
 # Step 2: Create directories on server
 echo ""
 echo ">>> Step 2: Preparing server directories..."
-$SSH_CMD "mkdir -p $APP_DIR/prisma/migrations $APP_DIR/dist /home/ubuntu/logs"
+"${SSH_CMD[@]}" "mkdir -p $APP_DIR/prisma/migrations $APP_DIR/dist /home/ubuntu/logs"
 
 # Step 3: Sync files to EC2
 echo ""
 echo ">>> Step 3: Uploading files..."
 
 # Upload dist (compiled JS)
-rsync -avz --delete -e "ssh -i $PEM_PATH -o StrictHostKeyChecking=no" \
-  dist/ $USER@$EC2_IP:$APP_DIR/dist/
+"${SSH_CMD[@]}" "rm -rf $APP_DIR/dist"
+scp -i "$PEM_PATH" -o StrictHostKeyChecking=no -r dist $USER@$EC2_IP:$APP_DIR/
 
 # Upload package files
-scp -i $PEM_PATH -o StrictHostKeyChecking=no \
+scp -i "$PEM_PATH" -o StrictHostKeyChecking=no \
   package.json package-lock.json ecosystem.config.js tsconfig.json \
   $USER@$EC2_IP:$APP_DIR/
 
 # Upload Prisma schema and migrations
-rsync -avz --delete -e "ssh -i $PEM_PATH -o StrictHostKeyChecking=no" \
-  prisma/ $USER@$EC2_IP:$APP_DIR/prisma/
+"${SSH_CMD[@]}" "rm -rf $APP_DIR/prisma"
+scp -i "$PEM_PATH" -o StrictHostKeyChecking=no -r prisma $USER@$EC2_IP:$APP_DIR/
 
 # Upload prisma.config.ts (needed for prisma generate)
-scp -i $PEM_PATH -o StrictHostKeyChecking=no \
+scp -i "$PEM_PATH" -o StrictHostKeyChecking=no \
   prisma.config.ts $USER@$EC2_IP:$APP_DIR/
 
 # Upload Nginx config
-scp -i $PEM_PATH -o StrictHostKeyChecking=no \
+scp -i "$PEM_PATH" -o StrictHostKeyChecking=no \
   deploy/nginx-instantlly.conf $USER@$EC2_IP:~/nginx-instantlly.conf
 
 # Upload .env (only if it doesn't exist on server — won't overwrite)
-$SSH_CMD "test -f $APP_DIR/.env" || scp -i $PEM_PATH -o StrictHostKeyChecking=no \
+"${SSH_CMD[@]}" "test -f $APP_DIR/.env" || scp -i "$PEM_PATH" -o StrictHostKeyChecking=no \
   .env $USER@$EC2_IP:$APP_DIR/.env
 
 echo "Files uploaded."
@@ -63,7 +63,7 @@ echo "Files uploaded."
 # Step 4: Install dependencies and generate Prisma client on server
 echo ""
 echo ">>> Step 4: Installing dependencies on server..."
-$SSH_CMD << 'REMOTE'
+"${SSH_CMD[@]}" << 'REMOTE'
 cd /home/ubuntu/instantlly-backend
 
 # Install production dependencies
@@ -81,7 +81,7 @@ REMOTE
 # Step 5: Set up Nginx (if not already done)
 echo ""
 echo ">>> Step 5: Configuring Nginx..."
-$SSH_CMD << 'REMOTE'
+"${SSH_CMD[@]}" << 'REMOTE'
 if [ ! -f /etc/nginx/sites-available/instantlly ]; then
     sudo cp ~/nginx-instantlly.conf /etc/nginx/sites-available/instantlly
     sudo ln -sf /etc/nginx/sites-available/instantlly /etc/nginx/sites-enabled/
@@ -98,7 +98,7 @@ REMOTE
 # Step 6: Start/Restart PM2
 echo ""
 echo ">>> Step 6: Starting application with PM2..."
-$SSH_CMD << 'REMOTE'
+"${SSH_CMD[@]}" << 'REMOTE'
 cd /home/ubuntu/instantlly-backend
 
 # Check if app is already running
