@@ -55,6 +55,16 @@ export async function rejectPromotion(req: AuthRequest, res: Response): Promise<
 
 export async function listAdCampaigns(req: AuthRequest, res: Response): Promise<void> {
   const status = req.query.approval_status as string | undefined;
+
+  // Auto-pause expired ads
+  await prisma.adCampaign.updateMany({
+    where: {
+      status: 'active',
+      end_date: { lt: new Date() }
+    },
+    data: { status: 'completed' }
+  });
+
   const where: any = {};
   if (status && status !== 'all') where.approval_status = status;
 
