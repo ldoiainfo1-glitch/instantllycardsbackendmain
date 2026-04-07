@@ -11,6 +11,7 @@ import {
 import { AuthRequest } from '../middleware/auth';
 import { jsonSafe } from '../utils/serialize';
 import { normalizePhone, phoneVariants } from '../utils/phone';
+import { generateOTP, storeOTP, verifyOTP, sendOTP } from '../utils/otp';
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 const log = (...args: any[]) => { if (!IS_PROD) console.log(...args); };
@@ -269,5 +270,131 @@ export async function changePassword(req: AuthRequest, res: Response): Promise<v
   } catch (err) {
     console.error('[CHANGE-PASSWORD] Failed', err);
     res.status(500).json({ error: 'Failed to update password' });
+  }
+}
+
+/**
+ * Send OTP for password reset
+ */
+export async function sendPasswordResetOTP(req: Request, res: Response): Promise<void> {
+  const { phone } = req.body;
+  
+  if (!phone) {
+    res.status(400).json({ error: 'Phone number is required' });
+    return;
+  }
+
+  const normalizedPhone = normalizePhone(phone);
+  log(`[FORGOT-PASSWORD] OTP request for phone: ${phone} → normalized: ${normalizedPhone}`);
+
+  try {
+    const variants = phoneVariants(phone);
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: variants.map((p) => ({ phone: p })),
+      },
+    });
+
+    if (!user) {
+      log(`[FORGOT-PASSWORD] User not found for ${normalizedPhone}`);
+      res.status(404).json({ error: 'Phone number not registered. Please sign up first.' });
+      return;
+    }
+
+    const otp = generateOTP();
+    storeOTP(normalizedPhone, otp);
+    await sendOTP(normalizedPhone, otp);
+
+    log(`[FORGOT-PASSWORD] OTP sent to ${normalizedPhone}`);
+    res.json({ message: 'OTP sent successfully' });
+  } catch (err) {
+    console.error('[FORGOT-PASSWORD] Failed to send OTP', err);
+    res.status(500).json({ error: 'Failed to send OTP' });
+  }
+}
+
+/**
+ * Verify OTP for password reset
+ */
+export async function verifyPasswordResetOTP(req: Request, res: Response): Promise<void> {
+  const { phone, otp } = req.body;
+
+  if (!phone || !otp) {
+    res.status(400).json({ error: 'Phone number and OTP are required' });
+    return;
+  }
+
+  const normalizedPhone = normalizePhone(phone);
+  log(`[FORGOT-PASSWORD] OTP verification for ${normalizedPhone}`);
+
+  // Don't consume OTP here — resetPassword will consume it
+  const isValid = verifyOTP(normalizedPhone, otp, false);
+
+  if (!isValid) {
+    warn(`[FORGOT-PASSWORD] Invalid or expired OTP for ${normalizedPhone}`);
+    res.status(401).json({ error: 'Invalid or expired OTP' });
+    return;
+  }
+
+  log(`[FORGOT-PASSWORD] OTP verified for ${normalizedPhone}`);
+  res.json({ message: 'OTP verified successfully' });
+}
+
+/**
+ * Reset password after OTP verification
+ */
+export async function resetPassword(req: Request, res: Response): Promise<void> {
+  const { phone, otp, newPassword } = req.body;
+
+  if (!phone || !otp || !newPassword) {
+    res.status(400).json({ error: 'Phone number, OTP, and new password are required' });
+    return;
+  }
+
+  if (newPassword.length < 6) {
+    res.status(400).json({ error: 'Password must be at least 6 characters' });
+    return;
+  }
+
+  const normalizedPhone = normalizePhone(phone);
+  log(`[FORGOT-PASSWORD] Password reset for ${normalizedPhone}`);
+
+  // Verify OTP again before allowing password reset
+  const isValid = verifyOTP(normalizedPhone, otp);
+
+  if (!isValid) {
+    warn(`[FORGOT-PASSWORD] Invalid or expired OTP for ${normalizedPhone}`);
+    res.status(401).json({ error: 'Invalid or expired OTP' });
+    return;
+  }
+
+  try {
+    const variants = phoneVariants(phone);
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: variants.map((p) => ({ phone: p })),
+      },
+    });
+
+    if (!user) {
+      warn(`[FORGOT-PASSWORD] User not found for ${normalizedPhone}`);
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await prisma.user.update({ 
+      where: { id: user.id }, 
+      data: { password_hash: newHash } 
+    });
+
+    // Revoke all refresh tokens for security
+    await prisma.refreshToken.deleteMany({ where: { user_id: user.id } });
+
+    log(`[FORGOT-PASSWORD] Password reset successful for userId: ${user.id}`);
+    res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    console.error('[FORGOT-PASSWORD] Failed to reset password', err);
+    res.status(500).json({ error: 'Failed to reset password' });
   }
 }

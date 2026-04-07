@@ -3,7 +3,17 @@ import { body } from 'express-validator';
 import rateLimit from 'express-rate-limit';
 import { validate } from '../middleware/validate';
 import { authenticate } from '../middleware/auth';
-import { signup, login, refresh, logout, me, changePassword } from '../controllers/authController';
+import { 
+  signup, 
+  login, 
+  refresh, 
+  logout, 
+  me, 
+  changePassword,
+  sendPasswordResetOTP,
+  verifyPasswordResetOTP,
+  resetPassword
+} from '../controllers/authController';
 
 const router = Router();
 
@@ -58,6 +68,40 @@ router.post(
   ],
   validate,
   changePassword
+);
+
+// Forgot password routes
+router.post(
+  '/forgot-password/send-otp',
+  authRateLimit,
+  [
+    body('phone').notEmpty().withMessage('Phone number is required'),
+  ],
+  validate,
+  sendPasswordResetOTP
+);
+
+router.post(
+  '/forgot-password/verify-otp',
+  authRateLimit,
+  [
+    body('phone').notEmpty().withMessage('Phone number is required'),
+    body('otp').notEmpty().withMessage('OTP is required'),
+  ],
+  validate,
+  verifyPasswordResetOTP
+);
+
+router.post(
+  '/forgot-password/reset-password',
+  authRateLimit,
+  [
+    body('phone').notEmpty().withMessage('Phone number is required'),
+    body('otp').notEmpty().withMessage('OTP is required'),
+    body('newPassword').isLength({ min: 6 }).withMessage('New password must be at least 6 characters'),
+  ],
+  validate,
+  resetPassword
 );
 
 export default router;
