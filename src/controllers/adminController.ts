@@ -98,6 +98,101 @@ export async function rejectAdCampaign(req: AuthRequest, res: Response): Promise
   res.json(campaign);
 }
 
+export async function getAdCampaignDetails(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const id = paramInt(req.params.id);
+    console.log('[getAdCampaignDetails] Fetching campaign:', id);
+
+    const campaign = await prisma.adCampaign.findUnique({
+      where: { id },
+      include: {
+        user: { select: { id: true, name: true, phone: true, email: true } },
+        business: { select: { id: true, company_name: true, logo_url: true } },
+        variants: {
+          select: { id: true, creative_url: true, label: true, impressions: true, clicks: true },
+        },
+      },
+    });
+
+    if (!campaign) {
+      res.status(404).json({ error: 'Campaign not found' });
+      return;
+    }
+
+    console.log('[getAdCampaignDetails] ✅ Found campaign:', campaign.title);
+    res.json(campaign);
+  } catch (err: any) {
+    console.error('[getAdCampaignDetails] ❌ Error:', err);
+    res.status(500).json({ error: 'Failed to fetch campaign details' });
+  }
+}
+
+export async function pauseAdCampaign(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const id = paramInt(req.params.id);
+    console.log('[pauseAdCampaign] Pausing campaign:', id);
+
+    const campaign = await prisma.adCampaign.update({
+      where: { id },
+      data: { status: 'paused' },
+      include: { user: { select: { id: true, name: true, phone: true } } },
+    });
+
+    console.log('[pauseAdCampaign] ✅ Campaign paused:', campaign.title);
+    res.json({ message: 'Campaign paused', campaign });
+  } catch (err: any) {
+    console.error('[pauseAdCampaign] ❌ Error:', err);
+    res.status(500).json({ error: 'Failed to pause campaign' });
+  }
+}
+
+export async function resumeAdCampaign(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const id = paramInt(req.params.id);
+    console.log('[resumeAdCampaign] Resuming campaign:', id);
+
+    const campaign = await prisma.adCampaign.update({
+      where: { id },
+      data: { status: 'active' },
+      include: { user: { select: { id: true, name: true, phone: true } } },
+    });
+
+    console.log('[resumeAdCampaign] ✅ Campaign resumed:', campaign.title);
+    res.json({ message: 'Campaign resumed', campaign });
+  } catch (err: any) {
+    console.error('[resumeAdCampaign] ❌ Error:', err);
+    res.status(500).json({ error: 'Failed to resume campaign' });
+  }
+}
+
+export async function deleteAdCampaign(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const id = paramInt(req.params.id);
+    console.log('[deleteAdCampaign] Deleting campaign:', id);
+
+    // Check if campaign exists
+    const campaign = await prisma.adCampaign.findUnique({ where: { id } });
+    if (!campaign) {
+      console.log('[deleteAdCampaign] ❌ Campaign not found:', id);
+      res.status(404).json({ error: 'Campaign not found' });
+      return;
+    }
+
+    // Delete variants first
+    const deletedVariants = await prisma.adVariant.deleteMany({ where: { campaign_id: id } });
+    console.log('[deleteAdCampaign] Deleted variants:', deletedVariants.count);
+
+    // Delete campaign
+    await prisma.adCampaign.delete({ where: { id } });
+
+    console.log('[deleteAdCampaign] ✅ Campaign deleted:', campaign.title);
+    res.json({ message: 'Campaign deleted successfully', campaign_id: id, title: campaign.title });
+  } catch (err: any) {
+    console.error('[deleteAdCampaign] ❌ Error:', err.message, err.code);
+    res.status(500).json({ error: err.message || 'Failed to delete campaign' });
+  }
+}
+
 // ─── Listing endpoints ──────────────────────────────────────────────────────
 
 export async function listUsers(req: AuthRequest, res: Response): Promise<void> {

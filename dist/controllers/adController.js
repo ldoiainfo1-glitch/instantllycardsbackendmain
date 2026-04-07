@@ -83,6 +83,7 @@ async function listAds(req, res) {
         const adType = (0, params_2.queryStr)(req.query.ad_type);
         const city = (0, params_2.queryStr)(req.query.city);
         const limit = (0, params_2.queryInt)(req.query.limit, 50);
+        console.log('[listAds] 📥 Request params:', { adType, city, limit });
         // Get campaigns (new system)
         const campaignWhere = {
             status: 'active',
@@ -96,16 +97,21 @@ async function listAds(req, res) {
             campaignWhere.ad_type = adType;
         if (city)
             campaignWhere.target_city = { contains: city, mode: 'insensitive' };
+        console.log('[listAds] 🔍 Campaign filter:', JSON.stringify(campaignWhere, null, 2));
         const campaigns = await prisma_1.default.adCampaign.findMany({
             where: campaignWhere,
             orderBy: [{ daily_budget: 'desc' }, { created_at: 'desc' }],
             include: { business: { select: { id: true, company_name: true, logo_url: true } } },
             take: limit,
         });
+        console.log('[listAds] ✅ Found campaigns:', campaigns.length);
+        if (campaigns.length > 0) {
+            console.log('[listAds] 📋 Campaign IDs:', campaigns.map(c => ({ id: c.id, title: c.title, creative_url: c.creative_url?.substring(0, 60) })));
+        }
         // If no campaigns, fall back to legacy ads
         let results = campaigns.map(normalizeCampaign);
         if (results.length === 0) {
-            console.log('[listAds] No campaigns found, falling back to legacy Ad table');
+            console.log('[listAds] ⚠️  No campaigns found, falling back to legacy Ad table');
             const legacyWhere = {
                 status: 'active',
                 OR: [
@@ -121,6 +127,7 @@ async function listAds(req, res) {
                 include: { business: { select: { id: true, company_name: true, logo_url: true } } },
                 take: limit,
             });
+            console.log('[listAds] ✅ Found legacy ads:', legacyAds.length);
             results = legacyAds.map(normalizeLeacyAd);
         }
         // Normalize all URLs before returning
@@ -129,10 +136,18 @@ async function listAds(req, res) {
             image_url: (0, urlNormalizer_1.normalizeCreativeUrl)(ad.image_url),
             cta_url: (0, urlNormalizer_1.normalizeCreativeUrl)(ad.cta_url),
         }));
+        console.log('[listAds] 📤 Returning', normalizedResults.length, 'ads');
+        if (normalizedResults.length > 0) {
+            console.log('[listAds] 🌐 Sample URLs:', normalizedResults.slice(0, 3).map(ad => ({
+                id: ad.id,
+                title: ad.title,
+                image_url: ad.image_url?.substring(0, 80)
+            })));
+        }
         res.json(normalizedResults);
     }
     catch (err) {
-        console.error('[listAds] error:', err);
+        console.error('[listAds] ❌ error:', err);
         res.status(500).json({ error: 'Failed to list ads' });
     }
 }

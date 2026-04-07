@@ -39,7 +39,23 @@ router.get('/reviews', listReviews);
 
 // Ad campaigns
 router.get('/ads', listAdCampaigns);
+router.get('/ads/:id', async (req, res) => {
+  const { getAdCampaignDetails } = await import('../controllers/adminController');
+  return getAdCampaignDetails(req, res);
+});
 router.post('/ads/:id/approve', approveAdCampaign);
 router.post('/ads/:id/reject', rejectAdCampaign);
+router.post('/ads/:id/pause', async (req, res) => {
+  const { pauseAdCampaign } = await import('../controllers/adminController');
+  return pauseAdCampaign(req, res);
+});
+router.post('/ads/:id/resume', async (req, res) => {
+  const { resumeAdCampaign } = await import('../controllers/adminController');
+  return resumeAdCampaign(req, res);
+});
+router.post('/ads/:id/delete', async (req, res) => {
+  const { deleteAdCampaign } = await import('../controllers/adminController');
+  return deleteAdCampaign(req, res);
+});
 
 export default router;
