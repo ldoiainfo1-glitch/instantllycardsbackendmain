@@ -158,13 +158,8 @@ export async function createCard(req: AuthRequest, res: Response): Promise<void>
       data: { ...data, user_id: req.user!.userId, approval_status: 'pending' } as any,
     });
 
-    // Ensure user has business role
-    const existing = await prisma.userRole.findFirst({
-      where: { user_id: req.user!.userId, role: 'business' },
-    });
-    if (!existing) {
-      await prisma.userRole.create({ data: { user_id: req.user!.userId, role: 'business' } });
-    }
+    // Business role is NOT auto-assigned here.
+    // It will be granted when admin approves the card.
 
     res.status(201).json(card);
   } catch (err) {

@@ -131,17 +131,28 @@ export async function login(req: Request, res: Response): Promise<void> {
 
     let roles = await getUserRoles(user.id);
 
-    // Check if user has active business promotion (eligible for dual role)
-    const hasActivePromotion = await prisma.businessPromotion.findFirst({
-      where: { user_id: user.id, is_active: true },
+    // Sync business role with card approval status (admin users are exempt)
+    const hasApprovedCard = await prisma.businessCard.findFirst({
+      where: { user_id: user.id, approval_status: 'approved' },
     });
-
-    if (hasActivePromotion && !roles.includes('business')) {
-      // Persist to DB so token refresh continues to include the role
+    if (hasApprovedCard && !roles.includes('business')) {
       await prisma.userRole.create({ data: { user_id: user.id, role: 'business' } });
-      log(`[LOGIN] Business promotion detected — persisted business role for userId: ${user.id}`);
+      log(`[LOGIN] Approved card found — granted business role for userId: ${user.id}`);
       roles.push('business');
+    } else if (!hasApprovedCard && roles.includes('business') && !roles.includes('admin')) {
+      await prisma.userRole.deleteMany({ where: { user_id: user.id, role: 'business' } });
+      log(`[LOGIN] No approved card — removed stale business role for userId: ${user.id}`);
+      roles = roles.filter(r => r !== 'business');
     }
+
+    // Check latest card approval status for frontend messaging
+    let businessApprovalStatus: string | null = null;
+    const latestCard = await prisma.businessCard.findFirst({
+      where: { user_id: user.id },
+      orderBy: { created_at: 'desc' },
+      select: { approval_status: true },
+    });
+    if (latestCard) businessApprovalStatus = latestCard.approval_status;
 
     log(`[LOGIN] Success — userId: ${user.id}, roles: [${roles.join(', ')}]`);
 
@@ -160,6 +171,7 @@ export async function login(req: Request, res: Response): Promise<void> {
       accessToken,
       refreshToken,
       user: { id: user.id, phone: user.phone, email: user.email, name: user.name, roles },
+      businessApprovalStatus,
     });
   } catch (err: any) {
     console.error('[LOGIN] Failed', err);

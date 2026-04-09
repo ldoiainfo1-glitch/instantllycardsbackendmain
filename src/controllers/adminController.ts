@@ -228,11 +228,26 @@ export async function listBusinesses(req: AuthRequest, res: Response): Promise<v
 
 export async function approveBusinessCard(req: AuthRequest, res: Response): Promise<void> {
   const id = paramInt(req.params.id);
-  const card = await prisma.businessCard.update({
+  const card = await prisma.businessCard.findUnique({ where: { id } });
+  if (!card) {
+    res.status(404).json({ error: 'Card not found' });
+    return;
+  }
+
+  const updated = await prisma.businessCard.update({
     where: { id },
     data: { approval_status: 'approved' },
   });
-  res.json(card);
+
+  // Grant business role to card owner if they don't already have it
+  const existingRole = await prisma.userRole.findFirst({
+    where: { user_id: card.user_id, role: 'business' },
+  });
+  if (!existingRole) {
+    await prisma.userRole.create({ data: { user_id: card.user_id, role: 'business' } });
+  }
+
+  res.json(updated);
 }
 
 export async function rejectBusinessCard(req: AuthRequest, res: Response): Promise<void> {
