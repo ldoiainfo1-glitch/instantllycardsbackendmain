@@ -1561,6 +1561,7 @@ model AdCampaign {
   id                Int       @id @default(autoincrement())
   user_id           Int
   business_card_id  Int?
+  phone             String?   // ← NEW: Direct phone number for direct calling
   title             String
   description       String?
   ad_type           String    @default("banner")

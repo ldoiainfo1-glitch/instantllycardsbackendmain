@@ -32,15 +32,18 @@ interface UnifiedAdResponse {
   title: string;
   description?: string;
   image_url?: string;
+  creative_url?: string;
+  creative_urls?: string[];
   cta_url?: string;
   ad_type: string;
   status: string;
   approval_status?: string;
   phone_number?: string;
+  business_card_id?: number | null;
   priority?: number;
   start_date?: Date | null;
   end_date?: Date | null;
-  business?: { id: number; company_name: string; logo_url?: string };
+  business?: { id: number; company_name: string; logo_url?: string; phone?: string };
   impressions?: number;
   clicks?: number;
   source: 'legacy' | 'campaign'; // Track which table it came from
@@ -79,10 +82,14 @@ function normalizeCampaign(campaign: any): UnifiedAdResponse {
     title: campaign.title,
     description: campaign.description,
     image_url: campaign.creative_url,
+    creative_url: campaign.creative_url,
+    creative_urls: campaign.creative_urls && campaign.creative_urls.length > 0 ? campaign.creative_urls : [],
     cta_url: campaign.cta,
     ad_type: campaign.ad_type,
     status: campaign.status,
     approval_status: campaign.approval_status,
+    phone_number: campaign.phone || campaign.business?.phone, // Use direct phone first, fallback to business
+    business_card_id: campaign.business_card_id,
     start_date: campaign.start_date,
     end_date: campaign.end_date,
     business: campaign.business,
@@ -119,7 +126,7 @@ export async function listAds(req: Request, res: Response): Promise<void> {
     const campaigns = await prisma.adCampaign.findMany({
       where: campaignWhere,
       orderBy: [{ daily_budget: 'desc' }, { created_at: 'desc' }],
-      include: { business: { select: { id: true, company_name: true, logo_url: true } } },
+      include: { business: { select: { id: true, company_name: true, logo_url: true, phone: true } } },
       take: limit,
     });
 
@@ -145,7 +152,7 @@ export async function listAds(req: Request, res: Response): Promise<void> {
       const legacyAds = await prisma.ad.findMany({
         where: legacyWhere,
         orderBy: [{ priority: 'desc' }, { created_at: 'desc' }],
-        include: { business: { select: { id: true, company_name: true, logo_url: true } } },
+        include: { business: { select: { id: true, company_name: true, logo_url: true, phone: true } } },
         take: limit,
       });
 
@@ -157,6 +164,8 @@ export async function listAds(req: Request, res: Response): Promise<void> {
     const normalizedResults = results.map((ad) => ({
       ...ad,
       image_url: normalizeCreativeUrl(ad.image_url),
+      creative_url: normalizeCreativeUrl(ad.creative_url),
+      creative_urls: ad.creative_urls?.map((url: string) => normalizeCreativeUrl(url)) || [],
       cta_url: normalizeCreativeUrl(ad.cta_url),
     }));
 
@@ -199,7 +208,7 @@ export async function getMyAds(req: AuthRequest, res: Response): Promise<void> {
 
     const legacyAds = await prisma.ad.findMany({
       where: { business_id: { in: cardIds } },
-      include: { business: { select: { id: true, company_name: true, logo_url: true } } },
+      include: { business: { select: { id: true, company_name: true, logo_url: true, phone: true } } },
       orderBy: { created_at: 'desc' },
     });
 
@@ -217,6 +226,8 @@ export async function getMyAds(req: AuthRequest, res: Response): Promise<void> {
     const normalized = results.map((ad) => ({
       ...ad,
       image_url: normalizeCreativeUrl(ad.image_url),
+      creative_url: normalizeCreativeUrl(ad.creative_url),
+      creative_urls: ad.creative_urls?.map((url: string) => normalizeCreativeUrl(url)) || [],
       cta_url: normalizeCreativeUrl(ad.cta_url),
     }));
 
@@ -564,7 +575,7 @@ export async function listLegacyAds(_req: Request, res: Response): Promise<void>
     const ads = await prisma.ad.findMany({
       where: { status: 'active' },
       orderBy: [{ priority: 'desc' }, { created_at: 'desc' }],
-      include: { business: { select: { id: true, company_name: true, logo_url: true } } },
+      include: { business: { select: { id: true, company_name: true, logo_url: true, phone: true } } },
       take: 50,
     });
     res.json(ads);

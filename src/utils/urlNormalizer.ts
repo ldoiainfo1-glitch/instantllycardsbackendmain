@@ -25,6 +25,12 @@ function isAbsoluteUrl(url: string | null | undefined): boolean {
 export function normalizeCreativeUrl(url: string | null | undefined): string | null {
   if (!url) return null;
 
+  // Fix inconsistent URLs: /ads/{id} → /api/ads/image/{id}
+  if (url.includes('/ads/') && !url.includes('/api/ads')) {
+    // Pattern: /ads/6908840e.../bottom → /api/ads/image/6908840e.../bottom
+    url = url.replace(/\/ads\//, '/api/ads/image/');
+  }
+
   // Already absolute URL
   if (isAbsoluteUrl(url)) {
     return url;

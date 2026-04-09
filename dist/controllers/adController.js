@@ -65,10 +65,14 @@ function normalizeCampaign(campaign) {
         title: campaign.title,
         description: campaign.description,
         image_url: campaign.creative_url,
+        creative_url: campaign.creative_url,
+        creative_urls: campaign.creative_urls && campaign.creative_urls.length > 0 ? campaign.creative_urls : [],
         cta_url: campaign.cta,
         ad_type: campaign.ad_type,
         status: campaign.status,
         approval_status: campaign.approval_status,
+        phone_number: campaign.phone || campaign.business?.phone, // Use direct phone first, fallback to business
+        business_card_id: campaign.business_card_id,
         start_date: campaign.start_date,
         end_date: campaign.end_date,
         business: campaign.business,
@@ -101,7 +105,7 @@ async function listAds(req, res) {
         const campaigns = await prisma_1.default.adCampaign.findMany({
             where: campaignWhere,
             orderBy: [{ daily_budget: 'desc' }, { created_at: 'desc' }],
-            include: { business: { select: { id: true, company_name: true, logo_url: true } } },
+            include: { business: { select: { id: true, company_name: true, logo_url: true, phone: true } } },
             take: limit,
         });
         console.log('[listAds] ✅ Found campaigns:', campaigns.length);
@@ -124,7 +128,7 @@ async function listAds(req, res) {
             const legacyAds = await prisma_1.default.ad.findMany({
                 where: legacyWhere,
                 orderBy: [{ priority: 'desc' }, { created_at: 'desc' }],
-                include: { business: { select: { id: true, company_name: true, logo_url: true } } },
+                include: { business: { select: { id: true, company_name: true, logo_url: true, phone: true } } },
                 take: limit,
             });
             console.log('[listAds] ✅ Found legacy ads:', legacyAds.length);
@@ -134,6 +138,8 @@ async function listAds(req, res) {
         const normalizedResults = results.map((ad) => ({
             ...ad,
             image_url: (0, urlNormalizer_1.normalizeCreativeUrl)(ad.image_url),
+            creative_url: (0, urlNormalizer_1.normalizeCreativeUrl)(ad.creative_url),
+            creative_urls: ad.creative_urls?.map((url) => (0, urlNormalizer_1.normalizeCreativeUrl)(url)) || [],
             cta_url: (0, urlNormalizer_1.normalizeCreativeUrl)(ad.cta_url),
         }));
         console.log('[listAds] 📤 Returning', normalizedResults.length, 'ads');
@@ -171,7 +177,7 @@ async function getMyAds(req, res) {
         const cardIds = cards.map((c) => c.id);
         const legacyAds = await prisma_1.default.ad.findMany({
             where: { business_id: { in: cardIds } },
-            include: { business: { select: { id: true, company_name: true, logo_url: true } } },
+            include: { business: { select: { id: true, company_name: true, logo_url: true, phone: true } } },
             orderBy: { created_at: 'desc' },
         });
         // Combine and normalize
@@ -187,6 +193,8 @@ async function getMyAds(req, res) {
         const normalized = results.map((ad) => ({
             ...ad,
             image_url: (0, urlNormalizer_1.normalizeCreativeUrl)(ad.image_url),
+            creative_url: (0, urlNormalizer_1.normalizeCreativeUrl)(ad.creative_url),
+            creative_urls: ad.creative_urls?.map((url) => (0, urlNormalizer_1.normalizeCreativeUrl)(url)) || [],
             cta_url: (0, urlNormalizer_1.normalizeCreativeUrl)(ad.cta_url),
         }));
         res.json(normalized);
@@ -513,7 +521,7 @@ async function listLegacyAds(_req, res) {
         const ads = await prisma_1.default.ad.findMany({
             where: { status: 'active' },
             orderBy: [{ priority: 'desc' }, { created_at: 'desc' }],
-            include: { business: { select: { id: true, company_name: true, logo_url: true } } },
+            include: { business: { select: { id: true, company_name: true, logo_url: true, phone: true } } },
             take: 50,
         });
         res.json(ads);
