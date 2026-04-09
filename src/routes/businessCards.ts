@@ -3,6 +3,7 @@ import { body } from 'express-validator';
 import rateLimit from 'express-rate-limit';
 import { validate } from '../middleware/validate';
 import { authenticate } from '../middleware/auth';
+import { FEATURES } from '../utils/featureFlags';
 import {
   listCards,
   getCard,
@@ -12,6 +13,7 @@ import {
   getMyCards,
   shareCard,
   getSharedCards,
+  bulkSendCard,
 } from '../controllers/businessCardController';
 
 const router = Router();
@@ -66,5 +68,33 @@ router.post(
   validate,
   shareCard
 );
+
+// Rate limit bulk send: 10 per hour per user
+const bulkSendLimit =
+  process.env.NODE_ENV === 'test'
+    ? (_req: any, _res: any, next: any) => next()
+    : rateLimit({
+        windowMs: 60 * 60 * 1000,
+        max: 10,
+        message: { error: 'Too many bulk sends, try again later' },
+        standardHeaders: true,
+        legacyHeaders: false,
+      });
+
+if (FEATURES.BULK_SEND) {
+  router.post(
+    '/bulk-send',
+    authenticate,
+    bulkSendLimit,
+    [
+      body('card_id').isInt().withMessage('card_id must be an integer'),
+      body('audience').notEmpty().withMessage('audience is required'),
+      body('audience_type').isIn(['category', 'subcategory']).withMessage('Invalid audience_type'),
+      body('level').isIn(['zone', 'state', 'division', 'pincode', 'village']).withMessage('Invalid level'),
+    ],
+    validate,
+    bulkSendCard
+  );
+}
 
 export default router;
