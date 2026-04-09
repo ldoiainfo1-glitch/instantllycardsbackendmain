@@ -246,45 +246,54 @@ async function getMobileSubcategories(req, res) {
         res.status(404).json({ error: 'Category not found' });
         return;
     }
-    const cacheKey = `${id}:${searchFilter}:${page}:${limit}`;
-    const data = await getMobileSubcategoriesCached(cacheKey, async () => {
-        const where = { parent_id: id, is_active: true };
-        if (searchFilter) {
-            where.name = { contains: searchFilter, mode: 'insensitive' };
-        }
-        const [children, totalChildren] = await Promise.all([
-            prisma_1.default.category.findMany({
-                where,
-                select: { name: true },
-                orderBy: [{ sort_order: 'asc' }, { name: 'asc' }],
-                skip: (page - 1) * limit,
-                take: limit,
-            }),
-            prisma_1.default.category.count({ where }),
-        ]);
-        if (totalChildren > 0) {
-            return children.map((child) => child.name.trim()).filter(Boolean);
-        }
-        const legacy = normalizeStringArray(category.subcategories);
-        const filtered = searchFilter
-            ? legacy.filter((s) => s.toLowerCase().includes(searchFilter))
-            : legacy;
-        const start = (page - 1) * limit;
-        return filtered.slice(start, start + limit);
-    });
-    let total = 0;
+    const childWhere = { parent_id: id, is_active: true };
+    if (searchFilter) {
+        childWhere.name = { contains: searchFilter, mode: 'insensitive' };
+    }
+    const [children, totalChildren] = await Promise.all([
+        prisma_1.default.category.findMany({
+            where: childWhere,
+            select: { id: true, name: true, icon: true },
+            orderBy: [{ sort_order: 'asc' }, { name: 'asc' }],
+            skip: (page - 1) * limit,
+            take: limit,
+        }),
+        prisma_1.default.category.count({ where: childWhere }),
+    ]);
     let source = 'nodes';
-    const where = { parent_id: id, is_active: true };
-    if (searchFilter)
-        where.name = { contains: searchFilter, mode: 'insensitive' };
-    total = await prisma_1.default.category.count({ where });
-    if (total === 0) {
+    let total = totalChildren;
+    let subcategories;
+    if (totalChildren > 0) {
+        // Count grandchildren for each child to tell the app if it should drill deeper
+        const childIds = children.map((c) => c.id);
+        const grandchildCounts = await prisma_1.default.category.groupBy({
+            by: ['parent_id'],
+            where: { parent_id: { in: childIds }, is_active: true },
+            _count: true,
+        });
+        const countMap = new Map(grandchildCounts.map((g) => [g.parent_id, g._count]));
+        subcategories = children.map((child) => ({
+            id: child.id,
+            name: child.name.trim(),
+            icon: child.icon || null,
+            child_count: countMap.get(child.id) ?? 0,
+        }));
+    }
+    else {
+        // Legacy fallback: subcategories stored as string array on parent
         const legacy = normalizeStringArray(category.subcategories);
         const filtered = searchFilter
             ? legacy.filter((s) => s.toLowerCase().includes(searchFilter))
             : legacy;
         total = filtered.length;
         source = 'legacy';
+        const start = (page - 1) * limit;
+        subcategories = filtered.slice(start, start + limit).map((name) => ({
+            id: null,
+            name,
+            icon: null,
+            child_count: 0,
+        }));
     }
     const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
     const hasMore = page * limit < total;
@@ -292,7 +301,7 @@ async function getMobileSubcategories(req, res) {
         data: {
             categoryId: category.id,
             categoryName: category.name.trim(),
-            subcategories: data,
+            subcategories,
         },
         meta: {
             page,

@@ -11,6 +11,7 @@ exports.deleteCard = deleteCard;
 exports.getMyCards = getMyCards;
 exports.shareCard = shareCard;
 exports.getSharedCards = getSharedCards;
+exports.bulkSendCard = bulkSendCard;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const params_1 = require("../utils/params");
 /** Whitelisted fields for card create/update — prevents arbitrary field injection. */
@@ -272,6 +273,101 @@ async function getSharedCards(req, res) {
     catch (err) {
         console.error('[SHARED-CARDS] Failed', err);
         res.status(500).json({ error: 'Failed to get shared cards' });
+    }
+}
+/**
+ * POST /api/cards/bulk-send
+ * Sends a business card to every user who has an approved, live card
+ * in the specified category (or subcategory). Skips the sender themselves
+ * and skips any duplicate (same card → same recipient) within the last 30 days.
+ */
+async function bulkSendCard(req, res) {
+    try {
+        const senderId = req.user.userId;
+        const { card_id, audience, audience_type, level } = req.body;
+        if (!card_id || !audience || !level) {
+            res.status(400).json({ error: 'card_id, audience and level are required' });
+            return;
+        }
+        const cardId = parseInt(String(card_id), 10);
+        // Verify the sender owns this card
+        const senderCard = await prisma_1.default.businessCard.findUnique({ where: { id: cardId } });
+        if (!senderCard || senderCard.user_id !== senderId) {
+            res.status(403).json({ error: 'Card not found or not owned by you' });
+            return;
+        }
+        const sender = await prisma_1.default.user.findUnique({ where: { id: senderId } });
+        if (!sender) {
+            res.status(404).json({ error: 'Sender not found' });
+            return;
+        }
+        // Find all users who have approved+live cards in that category
+        const recipientCards = await prisma_1.default.businessCard.findMany({
+            where: {
+                approval_status: 'approved',
+                is_live: true,
+                category: { contains: audience, mode: 'insensitive' },
+                user_id: { not: senderId }, // exclude sender
+            },
+            select: {
+                id: true,
+                user_id: true,
+                user: { select: { id: true, name: true, phone: true } },
+            },
+        });
+        if (recipientCards.length === 0) {
+            res.json({ sent: 0, message: 'No recipients found in this category yet' });
+            return;
+        }
+        // Deduplicate by user_id (one user may have multiple cards in same category)
+        const seenUsers = new Set();
+        const uniqueRecipients = recipientCards.filter((rc) => {
+            if (seenUsers.has(rc.user_id))
+                return false;
+            seenUsers.add(rc.user_id);
+            return true;
+        });
+        // Guard against re-sending same card to same recipient within 30 days
+        const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const existingSends = await prisma_1.default.sharedCard.findMany({
+            where: {
+                card_id: cardId,
+                sender_id: String(senderId),
+                sent_at: { gte: cutoff },
+            },
+            select: { recipient_id: true },
+        });
+        const alreadySentTo = new Set(existingSends.map((s) => s.recipient_id));
+        const newRecipients = uniqueRecipients.filter((r) => !alreadySentTo.has(String(r.user_id)));
+        if (newRecipients.length === 0) {
+            res.json({ sent: 0, message: 'Card already sent to all recipients in this category recently' });
+            return;
+        }
+        // Batch create SharedCard rows
+        await prisma_1.default.sharedCard.createMany({
+            data: newRecipients.map((r) => ({
+                card_id: cardId,
+                sender_id: String(senderId),
+                recipient_id: String(r.user_id),
+                card_title: senderCard.company_name || senderCard.full_name,
+                sender_name: sender.name || sender.phone,
+                recipient_name: r.user?.name || r.user?.phone || 'User',
+                card_photo: senderCard.company_photo || senderCard.logo_url || null,
+                sender_profile_picture: sender.profile_picture ?? null,
+                message: `Bulk send · ${audience} · ${level}`,
+            })),
+            skipDuplicates: true,
+        });
+        res.status(201).json({
+            sent: newRecipients.length,
+            audience,
+            level,
+            message: `Card sent to ${newRecipients.length} recipient(s) in "${audience}"`,
+        });
+    }
+    catch (err) {
+        console.error('[BULK-SEND] Failed', err);
+        res.status(500).json({ error: 'Failed to bulk send card' });
     }
 }
 //# sourceMappingURL=businessCardController.js.map
