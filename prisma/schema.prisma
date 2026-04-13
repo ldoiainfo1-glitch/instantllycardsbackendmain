@@ -442,10 +442,17 @@ model EventRegistration {
   user_id       Int
   ticket_count  Int      @default(1)
   qr_code       String?
+  payment_status String   @default("not_required")
+  payment_order_id String?
+  payment_id    String?
+  payment_signature String?
+  amount_paid   Float?
   registered_at DateTime @default(now())
 
   event Event @relation(fields: [event_id], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([payment_id])
 }
 
 // 12. Notifications
