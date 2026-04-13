@@ -1,6 +1,3 @@
-// Prisma Schema - Instantlly Cards Backend
-// All 32 tables defined
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,7 +6,1449 @@ datasource db {
   provider = "postgresql"
 }
 
-// ============== ENUMS ==============
+model User {
+  id                         Int                    @id @default(autoincrement())
+  legacy_id                  String?                @unique
+  email                      String?                @unique
+  phone                      String                 @unique
+  password_hash              String?
+  name                       String?
+  profile_picture            String?
+  about                      String?
+  gender                     String?
+  birthdate                  DateTime?
+  anniversary                DateTime?
+  push_token                 String?
+  platform                   String?
+  push_token_updated_at      DateTime?
+  credits                    BigInt?                @default(0)
+  credits_expiry_date        DateTime?
+  referral_code              String?                @unique
+  referred_by_id             Int?
+  service_type               String?
+  quiz_progress              Json?
+  parent_id                  Int?
+  level                      Int                    @default(0)
+  direct_count               Int                    @default(0)
+  downline_count             Int                    @default(0)
+  special_credits            Json?
+  is_voucher_admin           Boolean                @default(false)
+  voucher_balance            BigInt                 @default(0)
+  voucher_balances           Json?
+  ancestors                  Json?
+  needs_email                Boolean                @default(true)
+  created_at                 DateTime               @default(now())
+  updated_at                 DateTime               @updatedAt
+  activity_logs              ActivityLog[]
+  ad_clicks                  AdClick[]
+  ad_impressions             AdImpression[]
+  ad_payment_orders          AdPaymentOrder[]       @relation("AdPaymentOrderUser")
+  admin_invites_sent         AdminAccessInvite[]
+  admin_permissions          AdminPermission[]
+  bookings                   Booking[]
+  business_cards             BusinessCard[]
+  business_promotions        BusinessPromotion[]    @relation("BusinessPromotionUser")
+  campaigns                  Campaign[]
+  chat_participants          ChatParticipant[]      @relation("ChatParticipantUser")
+  contacts_app_user          Contact[]              @relation("ContactAppUser")
+  contacts                   Contact[]              @relation("ContactOwner")
+  enquiries                  Enquiry[]              @relation("EnquiryUser")
+  event_registrations        EventRegistration[]
+  favorites                  Favorite[]
+  feedbacks                  Feedback[]             @relation("FeedbackUser")
+  groups_admin               Group[]                @relation("GroupAdmin")
+  group_calls_initiated      GroupCall[]            @relation("GroupCallInitiator")
+  group_call_participants    GroupCallParticipant[] @relation("GroupCallParticipantUser")
+  group_members              GroupMember[]          @relation("GroupMemberUser")
+  loyalty_points             LoyaltyPoint[]         @relation("UserLoyaltyPoints")
+  received_messages          Message[]              @relation("receiver")
+  sent_messages              Message[]              @relation("sender")
+  mlm_credits_received       MlmCredit[]            @relation("MlmCreditReceiver")
+  mlm_credits_sent           MlmCredit[]            @relation("MlmCreditSender")
+  mlm_transfers_received     MlmTransfer[]          @relation("MlmTransferReceiver")
+  mlm_transfers_sent         MlmTransfer[]          @relation("MlmTransferSender")
+  mlm_wallet                 MlmWallet?             @relation("MlmWalletUser")
+  network_events             NetworkEvent[]         @relation("NetworkEventUser")
+  notifications              Notification[]         @relation("UserNotifications")
+  profile                    Profile?               @relation("UserProfile")
+  promotion_orders           PromotionOrder[]       @relation("PromotionOrderUser")
+  referrals_received         Referral[]             @relation("referred")
+  referrals_made             Referral[]             @relation("referrer")
+  refresh_tokens             RefreshToken[]         @relation("UserRefreshTokens")
+  reviews                    Review[]
+  slot_events                SlotEvent[]            @relation("SlotEventUser")
+  special_credit_slots       SpecialCredit[]        @relation("SpecialCreditOwner")
+  synced_contacts_app_user   SyncedContact[]        @relation("SyncedContactAppUser")
+  synced_contacts            SyncedContact[]        @relation("SyncedContactOwner")
+  transactions_sent          Transaction[]          @relation("TransactionFromUser")
+  transactions_received      Transaction[]          @relation("TransactionToUser")
+  parent_user                User?                  @relation("UserParent", fields: [parent_id], references: [id])
+  child_users                User[]                 @relation("UserParent")
+  referred_by                User?                  @relation("UserReferrals", fields: [referred_by_id], references: [id])
+  referred_users             User[]                 @relation("UserReferrals")
+  user_location              UserLocation?          @relation("UserLocationUser")
+  user_roles                 UserRole[]             @relation("UserRoles")
+  vouchers_created           Voucher[]              @relation("VoucherAdmin")
+  vouchers_original          Voucher[]              @relation("VoucherOriginalOwner")
+  vouchers_owned             Voucher[]              @relation("VoucherOwner")
+  vouchers_transferred_from  Voucher[]              @relation("VoucherTransferredFrom")
+  voucher_claims             VoucherClaim[]
+  voucher_redemptions        VoucherRedemption[]    @relation("VoucherRedemptionUser")
+  received_transfers         VoucherTransfer[]      @relation("recipient")
+  sent_transfers             VoucherTransfer[]      @relation("sender")
+  voucher_transfer_logs_from VoucherTransferLog[]   @relation("VoucherTransferLogFrom")
+  voucher_transfer_logs_to   VoucherTransferLog[]   @relation("VoucherTransferLogTo")
+  ad_campaigns               AdCampaign[]           @relation("UserAdCampaigns")
+}
+
+model Profile {
+  id         Int     @id @default(autoincrement())
+  legacy_id  String? @unique
+  user_id    Int     @unique
+  full_name  String?
+  phone      String?
+  avatar_url String?
+  location   String?
+  bio        String?
+  user       User    @relation("UserProfile", fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model UserRole {
+  id      Int  @id @default(autoincrement())
+  user_id Int
+  role    Role
+  user    User @relation("UserRoles", fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model RefreshToken {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  token_hash String
+  expires_at DateTime
+  created_at DateTime @default(now())
+  user       User     @relation("UserRefreshTokens", fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model BusinessCard {
+  id                    Int                    @id @default(autoincrement())
+  legacy_id             String?                @unique
+  user_id               Int
+  full_name             String
+  gender                String?
+  birthdate             DateTime?
+  anniversary           DateTime?
+  personal_country_code String?
+  personal_phone        String?
+  phone                 String?
+  email                 String?
+  company_name          String?
+  job_title             String?
+  logo_url              String?
+  description           String?
+  category              String?
+  services              String[]               @default([])
+  services_offered      String?
+  instagram             String?
+  facebook              String?
+  linkedin              String?
+  youtube               String?
+  twitter               String?
+  whatsapp              String?
+  telegram              String?
+  website               String?
+  business_hours        String?
+  location              String?
+  maps_link             String?
+  company_country_code  String?
+  company_phone         String?
+  company_email         String?
+  company_website       String?
+  company_address       String?
+  company_maps_link     String?
+  pincode               String?
+  gst_number            String?
+  pan_number            String?
+  message               String?
+  company_photo         String?
+  about_business        String?
+  offer                 String?
+  keywords              String?
+  established_year      String?
+  is_default            Boolean                @default(false)
+  created_at            DateTime               @default(now())
+  updated_at            DateTime               @updatedAt
+  approval_status       String                 @default("pending")
+  is_live               Boolean                @default(true)
+  latitude              Float?
+  longitude             Float?
+  service_mode          String?
+  ads                   Ad[]
+  bookings              Booking[]
+  user                  User                   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  categories            BusinessCardCategory[]
+  company_phones        BusinessCardPhone[]
+  business_locations    BusinessLocation[]
+  business_photos       BusinessPhoto[]
+  promotions            BusinessPromotion[]    @relation("BusinessCardPromotions")
+  business_staff        BusinessStaff[]
+  card_analytics        CardAnalytic[]
+  card_shares           CardShare[]            @relation("BusinessCardShares")
+  events                Event[]
+  favorites             Favorite[]
+  group_shared_cards    GroupSharedCard[]      @relation("BusinessCardGroupSharedCards")
+  leads                 Lead[]
+  reviews               Review[]
+  shared_cards          SharedCard[]           @relation("BusinessCardSharedCards")
+  vouchers              Voucher[]
+  ad_campaigns          AdCampaign[]           @relation("BusinessCardAdCampaigns")
+
+  @@index([user_id])
+  @@index([created_at])
+  @@index([category])
+  @@index([company_name])
+  @@index([full_name])
+}
+
+model Booking {
+  id             Int           @id @default(autoincrement())
+  legacy_id      String?       @unique
+  user_id        Int
+  business_id    Int
+  business_name  String
+  mode           BookingMode
+  booking_date   DateTime
+  booking_time   String
+  customer_name  String
+  customer_phone String
+  notes          String?
+  status         BookingStatus @default(pending)
+  created_at     DateTime      @default(now())
+  business       BusinessCard  @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  user           User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id])
+  @@index([user_id])
+  @@index([created_at])
+}
+
+model Review {
+  id          Int          @id @default(autoincrement())
+  legacy_id   String?      @unique
+  user_id     Int
+  business_id Int
+  rating      Int
+  comment     String?
+  photo_url   String?
+  created_at  DateTime     @default(now())
+  business    BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model Voucher {
+  id                    Int                  @id @default(autoincrement())
+  legacy_id             String?              @unique
+  business_id           Int?
+  business_name         String
+  title                 String
+  description           String?
+  discount_type         String
+  discount_value        Float
+  code                  String?              @unique
+  max_claims            Int?
+  claimed_count         Int                  @default(0)
+  expires_at            DateTime?
+  status                String               @default("active")
+  created_at            DateTime             @default(now())
+  updated_at            DateTime             @updatedAt
+  owner_user_id         Int?
+  original_owner_id     Int?
+  voucher_number        String?
+  mrp                   Float?
+  issue_date            DateTime?
+  expiry_date           DateTime?
+  redeemed_status       String?
+  voucher_images        String[]             @default([])
+  product_video_link    String?
+  redeemed_at           DateTime?
+  max_uses              Int?
+  remaining_uses        Int?
+  company_logo          String?
+  company_name          String?
+  phone_number          String?
+  address               String?
+  amount                Float?
+  discount_percentage   Float?
+  validity              String?
+  voucher_image         String?
+  min_vouchers_required Int?
+  template_id           Int?
+  is_published          Boolean?
+  published_at          DateTime?
+  created_by_admin_id   Int?
+  source                String?
+  transferred_from_id   Int?
+  transferred_at        DateTime?
+  ad_payment_orders     AdPaymentOrder[]     @relation("VoucherAdPaymentOrders")
+  mlm_transfers         MlmTransfer[]        @relation("VoucherMlmTransfers")
+  promotion_orders      PromotionOrder[]     @relation("VoucherPromotionOrders")
+  special_credits       SpecialCredit[]      @relation("VoucherSpecialCredits")
+  business              BusinessCard?        @relation(fields: [business_id], references: [id])
+  created_by_admin      User?                @relation("VoucherAdmin", fields: [created_by_admin_id], references: [id])
+  original_owner        User?                @relation("VoucherOriginalOwner", fields: [original_owner_id], references: [id])
+  owner_user            User?                @relation("VoucherOwner", fields: [owner_user_id], references: [id])
+  template              Voucher?             @relation("VoucherTemplate", fields: [template_id], references: [id])
+  derived_vouchers      Voucher[]            @relation("VoucherTemplate")
+  transferred_from      User?                @relation("VoucherTransferredFrom", fields: [transferred_from_id], references: [id])
+  claims                VoucherClaim[]
+  voucher_redemptions   VoucherRedemption[]
+  transfers             VoucherTransfer[]
+  voucher_transfer_logs VoucherTransferLog[]
+
+  @@index([business_id])
+  @@index([status])
+  @@index([expires_at])
+}
+
+model VoucherClaim {
+  id          Int       @id @default(autoincrement())
+  legacy_id   String?   @unique
+  voucher_id  Int
+  user_id     Int
+  claimed_at  DateTime  @default(now())
+  redeemed_at DateTime?
+  user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  voucher     Voucher   @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
+}
+
+model VoucherTransfer {
+  id              Int      @id @default(autoincrement())
+  legacy_id       String?  @unique
+  voucher_id      Int
+  sender_id       Int
+  recipient_id    Int
+  sender_phone    String
+  recipient_phone String
+  transferred_at  DateTime @default(now())
+  recipient       User     @relation("recipient", fields: [recipient_id], references: [id], onDelete: Cascade)
+  sender          User     @relation("sender", fields: [sender_id], references: [id], onDelete: Cascade)
+  voucher         Voucher  @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
+}
+
+model Event {
+  id             Int                 @id @default(autoincrement())
+  legacy_id      String?             @unique
+  business_id    Int
+  title          String
+  description    String?
+  date           DateTime
+  time           String
+  location       String?
+  image_url      String?
+  ticket_price   Float?
+  max_attendees  Int?
+  attendee_count Int                 @default(0)
+  status         String              @default("active")
+  created_at     DateTime            @default(now())
+  business       BusinessCard        @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  registrations  EventRegistration[]
+}
+
+model EventRegistration {
+  id            Int      @id @default(autoincrement())
+  legacy_id     String?  @unique
+  event_id      Int
+  user_id       Int
+  ticket_count  Int      @default(1)
+  qr_code       String?
+  payment_status String   @default("not_required")
+  payment_order_id String?
+  payment_id    String?
+  payment_signature String?
+  amount_paid   Float?
+  registered_at DateTime @default(now())
+
+  event Event @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([payment_id])
+}
+
+model Notification {
+  id          Int      @id @default(autoincrement())
+  legacy_id   String?  @unique
+  user_id     Int
+  title       String
+  description String?
+  type        String?
+  is_read     Boolean  @default(false)
+  created_at  DateTime @default(now())
+  user        User     @relation("UserNotifications", fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model Message {
+  id                  Int         @id @default(autoincrement())
+  legacy_id           String?     @unique
+  sender_id           Int
+  receiver_id         Int?
+  chat_id             Int?
+  group_id            Int?
+  content             String
+  message_type        MessageType @default(text)
+  is_read             Boolean     @default(false)
+  read_at             DateTime?
+  is_delivered        Boolean     @default(false)
+  delivered_at        DateTime?
+  is_pending_delivery Boolean     @default(false)
+  local_message_id    String?
+  conversation_id     String?
+  metadata            Json?
+  is_deleted          Boolean     @default(false)
+  deleted_at          DateTime?
+  created_at          DateTime    @default(now())
+  updated_at          DateTime    @updatedAt
+  chat_last_for       Chat?       @relation("ChatLastMessage")
+  group_last_for      Group?      @relation("GroupLastMessage")
+  chat                Chat?       @relation("ChatMessages", fields: [chat_id], references: [id])
+  group               Group?      @relation("GroupMessages", fields: [group_id], references: [id])
+  receiver            User?       @relation("receiver", fields: [receiver_id], references: [id])
+  sender              User        @relation("sender", fields: [sender_id], references: [id], onDelete: Cascade)
+}
+
+model Favorite {
+  id         Int          @id @default(autoincrement())
+  legacy_id  String?      @unique
+  user_id    Int
+  card_id    Int
+  created_at DateTime     @default(now())
+  card       BusinessCard @relation(fields: [card_id], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, card_id])
+}
+
+model Ad {
+  id                        Int              @id @default(autoincrement())
+  legacy_id                 String?          @unique
+  business_id               Int
+  title                     String
+  description               String?
+  image_url                 String?
+  cta_url                   String?
+  ad_type                   AdType
+  budget                    Float?
+  spent                     Float            @default(0)
+  impressions               Int              @default(0)
+  clicks                    Int              @default(0)
+  status                    String           @default("active")
+  start_date                DateTime?
+  end_date                  DateTime?
+  created_at                DateTime         @default(now())
+  bottom_image              String?
+  bottom_image_gridfs       String?
+  fullscreen_image          String?
+  fullscreen_image_gridfs   String?
+  bottom_media_type         String?
+  fullscreen_media_type     String?
+  bottom_video_url          String?
+  fullscreen_video_url      String?
+  bottom_image_s3_url       String?
+  bottom_image_s3_key       String?
+  fullscreen_image_s3_url   String?
+  fullscreen_image_s3_key   String?
+  bottom_video_s3_url       String?
+  bottom_video_s3_key       String?
+  fullscreen_video_s3_url   String?
+  fullscreen_video_s3_key   String?
+  bottom_video              String?
+  bottom_video_gridfs       String?
+  fullscreen_video          String?
+  fullscreen_video_gridfs   String?
+  ad_type_legacy            String?
+  phone_number              String?
+  priority                  Int?             @default(5)
+  approval_status           String?
+  uploaded_by               String?
+  uploader_name             String?
+  approved_by               String?
+  approval_date             DateTime?
+  rejection_reason          String?
+  payment_status            String?
+  payment_order_id          Int?
+  business                  BusinessCard     @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  ad_clicks                 AdClick[]
+  ad_impressions            AdImpression[]
+  payment_orders            AdPaymentOrder[] @relation("AdPaymentOrders")
+  completed_design_requests DesignRequest[]  @relation("DesignRequestCompletedAd")
+  transactions              Transaction[]    @relation("AdTransactions")
+}
+
+model AdImpression {
+  id         Int      @id @default(autoincrement())
+  legacy_id  String?  @unique
+  ad_id      Int
+  user_id    Int?
+  created_at DateTime @default(now())
+  ad         Ad       @relation(fields: [ad_id], references: [id], onDelete: Cascade)
+  user       User?    @relation(fields: [user_id], references: [id])
+}
+
+model AdClick {
+  id         Int      @id @default(autoincrement())
+  legacy_id  String?  @unique
+  ad_id      Int
+  user_id    Int?
+  created_at DateTime @default(now())
+  ad         Ad       @relation(fields: [ad_id], references: [id], onDelete: Cascade)
+  user       User?    @relation(fields: [user_id], references: [id])
+}
+
+model Lead {
+  id             Int          @id @default(autoincrement())
+  legacy_id      String?      @unique
+  business_id    Int
+  customer_name  String
+  customer_phone String?
+  customer_email String?
+  message        String?
+  status         LeadStatus   @default(new)
+  created_at     DateTime     @default(now())
+  business       BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
+}
+
+model LoyaltyPoint {
+  id          Int      @id @default(autoincrement())
+  legacy_id   String?  @unique
+  user_id     Int
+  points      Int
+  action      String
+  description String?
+  created_at  DateTime @default(now())
+  user        User     @relation("UserLoyaltyPoints", fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model Referral {
+  id           Int      @id @default(autoincrement())
+  legacy_id    String?  @unique
+  referrer_id  Int
+  referred_id  Int
+  status       String   @default("pending")
+  reward_given Boolean  @default(false)
+  created_at   DateTime @default(now())
+  referred     User     @relation("referred", fields: [referred_id], references: [id], onDelete: Cascade)
+  referrer     User     @relation("referrer", fields: [referrer_id], references: [id], onDelete: Cascade)
+}
+
+model Campaign {
+  id              Int      @id @default(autoincrement())
+  legacy_id       String?  @unique
+  admin_id        Int
+  title           String
+  body            String?
+  campaign_type   String?
+  target_audience String?
+  status          String   @default("draft")
+  sent_count      Int      @default(0)
+  created_at      DateTime @default(now())
+  admin           User     @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+}
+
+model ActivityLog {
+  id          Int      @id @default(autoincrement())
+  legacy_id   String?  @unique
+  event_type  String
+  entity_type String?
+  entity_id   Int?
+  metadata    Json?
+  admin_id    Int?
+  created_at  DateTime @default(now())
+  admin       User?    @relation(fields: [admin_id], references: [id])
+}
+
+model AdminAlert {
+  id          Int      @id @default(autoincrement())
+  legacy_id   String?  @unique
+  alert_type  String
+  severity    Severity
+  title       String
+  message     String?
+  entity_id   Int?
+  is_resolved Boolean  @default(false)
+  created_at  DateTime @default(now())
+}
+
+model AdminMetricDaily {
+  id                Int      @id @default(autoincrement())
+  metric_date       DateTime @unique
+  total_users       Int      @default(0)
+  total_businesses  Int      @default(0)
+  total_bookings    Int      @default(0)
+  total_revenue     Float    @default(0)
+  pending_approvals Int      @default(0)
+  active_ads        Int      @default(0)
+  new_signups_7d    Int      @default(0)
+  computed_at       DateTime @default(now())
+}
+
+model SpamFlag {
+  id          Int      @id @default(autoincrement())
+  legacy_id   String?  @unique
+  flag_type   String
+  entity_type String
+  entity_id   Int
+  reason      String?
+  is_resolved Boolean  @default(false)
+  created_at  DateTime @default(now())
+}
+
+model SyncedContact {
+  id           Int      @id @default(autoincrement())
+  legacy_id    String?  @unique
+  user_id      Int
+  phone_number String
+  contact_name String?
+  is_app_user  Boolean  @default(false)
+  app_user_id  Int?
+  last_synced  DateTime @default(now())
+  created_at   DateTime @default(now())
+  app_user     User?    @relation("SyncedContactAppUser", fields: [app_user_id], references: [id])
+  user         User     @relation("SyncedContactOwner", fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, phone_number])
+}
+
+model CardAnalytic {
+  id              Int          @id @default(autoincrement())
+  legacy_id       String?      @unique
+  card_id         Int
+  views           Int          @default(0)
+  shares          Int          @default(0)
+  saves           Int          @default(0)
+  whatsapp_clicks Int          @default(0)
+  call_clicks     Int          @default(0)
+  created_at      DateTime     @default(now())
+  card            BusinessCard @relation(fields: [card_id], references: [id], onDelete: Cascade)
+}
+
+model BusinessLocation {
+  id          Int          @id @default(autoincrement())
+  legacy_id   String?      @unique
+  business_id Int
+  label       String?
+  address     String
+  lat         Float?
+  lng         Float?
+  is_primary  Boolean      @default(false)
+  business    BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
+}
+
+model BusinessStaff {
+  id          Int          @id @default(autoincrement())
+  legacy_id   String?      @unique
+  business_id Int
+  name        String
+  role        String?
+  phone       String?
+  email       String?
+  business    BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
+}
+
+model BusinessPhoto {
+  id          Int          @id @default(autoincrement())
+  legacy_id   String?      @unique
+  business_id Int
+  photo_url   String
+  caption     String?
+  sort_order  Int          @default(0)
+  business    BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
+}
+
+model AdminPermission {
+  id                  Int     @id @default(autoincrement())
+  legacy_id           String? @unique
+  admin_user_id       Int
+  permission_category String
+  can_view            Boolean @default(false)
+  can_edit            Boolean @default(false)
+  can_delete          Boolean @default(false)
+  can_approve         Boolean @default(false)
+  admin               User    @relation(fields: [admin_user_id], references: [id], onDelete: Cascade)
+}
+
+model AdminAccessInvite {
+  id            Int          @id @default(autoincrement())
+  legacy_id     String?      @unique
+  invited_email String
+  access_level  String
+  invited_by    Int
+  status        InviteStatus @default(pending)
+  created_at    DateTime     @default(now())
+  inviter       User         @relation(fields: [invited_by], references: [id], onDelete: Cascade)
+}
+
+model Category {
+  id             Int                    @id @default(autoincrement())
+  legacy_id      String?                @unique
+  name           String
+  icon           String?
+  parent_id      Int?
+  level          Int                    @default(0)
+  subcategories  String[]               @default([])
+  is_active      Boolean                @default(true)
+  sort_order     Int                    @default(0)
+  created_at     DateTime               @default(now())
+  updated_at     DateTime               @updatedAt
+  business_cards BusinessCardCategory[]
+  parent         Category?              @relation("CategoryParent", fields: [parent_id], references: [id])
+  children       Category[]             @relation("CategoryParent")
+}
+
+model BusinessCardCategory {
+  id               Int          @id @default(autoincrement())
+  business_card_id Int
+  category_id      Int
+  business_card    BusinessCard @relation(fields: [business_card_id], references: [id], onDelete: Cascade)
+  category         Category     @relation(fields: [category_id], references: [id], onDelete: Cascade)
+
+  @@unique([business_card_id, category_id])
+}
+
+model BusinessCardPhone {
+  id               Int          @id @default(autoincrement())
+  business_card_id Int
+  country_code     String?
+  phone            String?
+  business_card    BusinessCard @relation(fields: [business_card_id], references: [id], onDelete: Cascade)
+}
+
+model Contact {
+  id           Int      @id @default(autoincrement())
+  legacy_id    String?  @unique
+  user_id      Int
+  name         String
+  phone_number String
+  is_app_user  Boolean  @default(false)
+  app_user_id  Int?
+  last_synced  DateTime @default(now())
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+  app_user     User?    @relation("ContactAppUser", fields: [app_user_id], references: [id])
+  user         User     @relation("ContactOwner", fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, phone_number])
+}
+
+model Chat {
+  id                Int               @id @default(autoincrement())
+  legacy_id         String?           @unique
+  is_group          Boolean           @default(false)
+  group_id          Int?
+  last_message_id   Int?              @unique
+  last_message_time DateTime          @default(now())
+  is_active         Boolean           @default(true)
+  created_at        DateTime          @default(now())
+  updated_at        DateTime          @updatedAt
+  group             Group?            @relation("GroupChats", fields: [group_id], references: [id])
+  last_message      Message?          @relation("ChatLastMessage", fields: [last_message_id], references: [id])
+  participants      ChatParticipant[] @relation("ChatParticipants")
+  messages          Message[]         @relation("ChatMessages")
+}
+
+model ChatParticipant {
+  id           Int      @id @default(autoincrement())
+  chat_id      Int
+  user_id      Int
+  unread_count Int      @default(0)
+  is_muted     Boolean  @default(false)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+  chat         Chat     @relation("ChatParticipants", fields: [chat_id], references: [id], onDelete: Cascade)
+  user         User     @relation("ChatParticipantUser", fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([chat_id, user_id])
+}
+
+model Group {
+  id                Int               @id @default(autoincrement())
+  legacy_id         String?           @unique
+  name              String
+  description       String?
+  icon              String?
+  admin_id          Int
+  join_code         String?           @unique
+  last_message_id   Int?              @unique
+  last_message_time DateTime          @default(now())
+  is_active         Boolean           @default(true)
+  created_at        DateTime          @default(now())
+  updated_at        DateTime          @updatedAt
+  chats             Chat[]            @relation("GroupChats")
+  admin             User              @relation("GroupAdmin", fields: [admin_id], references: [id], onDelete: Cascade)
+  last_message      Message?          @relation("GroupLastMessage", fields: [last_message_id], references: [id])
+  group_calls       GroupCall[]       @relation("GroupCalls")
+  members           GroupMember[]     @relation("GroupMembers")
+  shared_cards      GroupSharedCard[] @relation("GroupSharedCards")
+  messages          Message[]         @relation("GroupMessages")
+}
+
+model GroupMember {
+  id         Int      @id @default(autoincrement())
+  group_id   Int
+  user_id    Int
+  role       String   @default("member")
+  is_muted   Boolean  @default(false)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  group      Group    @relation("GroupMembers", fields: [group_id], references: [id], onDelete: Cascade)
+  user       User     @relation("GroupMemberUser", fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([group_id, user_id])
+}
+
+model GroupCall {
+  id           Int                    @id @default(autoincrement())
+  legacy_id    String?                @unique
+  call_id      String                 @unique
+  group_id     Int
+  initiator_id Int
+  call_type    String                 @default("audio")
+  start_time   DateTime               @default(now())
+  end_time     DateTime?
+  status       String                 @default("ringing")
+  duration     Int?
+  created_at   DateTime               @default(now())
+  updated_at   DateTime               @updatedAt
+  group        Group                  @relation("GroupCalls", fields: [group_id], references: [id], onDelete: Cascade)
+  initiator    User                   @relation("GroupCallInitiator", fields: [initiator_id], references: [id], onDelete: Cascade)
+  participants GroupCallParticipant[] @relation("GroupCallParticipants")
+}
+
+model GroupCallParticipant {
+  id            Int       @id @default(autoincrement())
+  group_call_id Int
+  user_id       Int
+  joined_at     DateTime  @default(now())
+  left_at       DateTime?
+  is_initiator  Boolean   @default(false)
+  group_call    GroupCall @relation("GroupCallParticipants", fields: [group_call_id], references: [id], onDelete: Cascade)
+  user          User      @relation("GroupCallParticipantUser", fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model GroupSession {
+  id                        Int                       @id @default(autoincrement())
+  legacy_id                 String?                   @unique
+  code                      String                    @unique
+  admin_id                  String
+  admin_name                String
+  admin_phone               String
+  admin_photo               String?
+  status                    String                    @default("waiting")
+  allow_participant_sharing Boolean                   @default(false)
+  created_at                DateTime                  @default(now())
+  expires_at                DateTime
+  is_active                 Boolean                   @default(true)
+  card_shares               CardShare[]               @relation("GroupSessionCardShares")
+  participants              GroupSessionParticipant[]
+}
+
+model GroupSessionParticipant {
+  id                     Int          @id @default(autoincrement())
+  group_session_id       Int
+  user_id                String
+  user_name              String
+  user_phone             String
+  photo                  String?
+  joined_at              DateTime     @default(now())
+  cards_to_share         Json?
+  default_card_legacy_id String?
+  is_online              Boolean      @default(true)
+  session                GroupSession @relation(fields: [group_session_id], references: [id], onDelete: Cascade)
+}
+
+model CardShare {
+  id           Int           @id @default(autoincrement())
+  legacy_id    String?       @unique
+  session_id   Int
+  from_user_id String
+  to_user_id   String
+  card_id      Int?
+  shared_at    DateTime      @default(now())
+  card         BusinessCard? @relation("BusinessCardShares", fields: [card_id], references: [id])
+  session      GroupSession  @relation("GroupSessionCardShares", fields: [session_id], references: [id], onDelete: Cascade)
+}
+
+model SharedCard {
+  id                        Int          @id @default(autoincrement())
+  legacy_id                 String?      @unique
+  card_id                   Int
+  sender_id                 String
+  recipient_id              String
+  message                   String?
+  status                    String       @default("sent")
+  sent_at                   DateTime     @default(now())
+  viewed_at                 DateTime?
+  card_title                String
+  sender_name               String
+  recipient_name            String
+  card_photo                String?
+  sender_profile_picture    String?
+  recipient_profile_picture String?
+  created_at                DateTime     @default(now())
+  updated_at                DateTime     @updatedAt
+  card                      BusinessCard @relation("BusinessCardSharedCards", fields: [card_id], references: [id], onDelete: Cascade)
+}
+
+model GroupSharedCard {
+  id          Int          @id @default(autoincrement())
+  legacy_id   String?      @unique
+  card_id     Int
+  sender_id   String
+  group_id    Int
+  message     String?
+  sent_at     DateTime     @default(now())
+  card_title  String
+  sender_name String
+  group_name  String
+  created_at  DateTime     @default(now())
+  updated_at  DateTime     @updatedAt
+  card        BusinessCard @relation("BusinessCardGroupSharedCards", fields: [card_id], references: [id], onDelete: Cascade)
+  group       Group        @relation("GroupSharedCards", fields: [group_id], references: [id], onDelete: Cascade)
+}
+
+model BusinessPromotion {
+  id                         Int              @id @default(autoincrement())
+  legacy_id                  String?          @unique
+  user_id                    Int
+  business_card_id           Int?
+  business_name              String
+  owner_name                 String
+  description                String?
+  category                   String[]         @default([])
+  email                      String?
+  phone                      String?
+  whatsapp                   String?
+  website                    String?
+  business_hours             Json?
+  area                       String?
+  pincode                    String?
+  plot_no                    String?
+  building_name              String?
+  street_name                String?
+  landmark                   String?
+  city                       String?
+  state                      String?
+  gst_number                 String?
+  pan_number                 String?
+  listing_type               String           @default("free")
+  listing_intent             String           @default("free")
+  status                     String           @default("draft")
+  current_step               String?
+  progress                   Int              @default(0)
+  step_index                 Int              @default(1)
+  plan_name                  String?
+  plan_price                 Float?
+  plan_duration_days         Int?
+  plan_activated_at          DateTime?
+  payment_status             String           @default("not_required")
+  payment_id                 String?
+  visibility_priority_score  Int              @default(10)
+  visibility_impressions     Int              @default(0)
+  visibility_clicks          Int              @default(0)
+  visibility_leads           Int              @default(0)
+  visibility_call_clicks     Int              @default(0)
+  visibility_whatsapp_clicks Int              @default(0)
+  media                      Json?
+  is_active                  Boolean          @default(false)
+  expiry_date                DateTime?
+  created_at                 DateTime         @default(now())
+  updated_at                 DateTime         @updatedAt
+  business_card              BusinessCard?    @relation("BusinessCardPromotions", fields: [business_card_id], references: [id])
+  user                       User             @relation("BusinessPromotionUser", fields: [user_id], references: [id], onDelete: Cascade)
+  enquiries                  Enquiry[]        @relation("BusinessPromotionEnquiries")
+  promotion_orders           PromotionOrder[] @relation("BusinessPromotionOrders")
+
+  @@index([user_id])
+  @@index([business_card_id])
+  @@index([listing_type])
+  @@index([status])
+  @@index([is_active])
+  @@index([created_at])
+  @@index([city])
+  @@index([state])
+  @@index([category], type: Gin)
+}
+
+model PromotionPricingPlan {
+  id             Int              @id @default(autoincrement())
+  legacy_id      String?          @unique
+  code           String           @unique
+  area_type      String
+  rank           Int
+  rank_label     String
+  amount         Float
+  currency       String           @default("INR")
+  duration_days  Int              @default(30)
+  priority_score Int              @default(10)
+  is_active      Boolean          @default(true)
+  created_at     DateTime         @default(now())
+  updated_at     DateTime         @updatedAt
+  orders         PromotionOrder[]
+}
+
+model PromotionOrder {
+  id                     Int                  @id @default(autoincrement())
+  legacy_id              String?              @unique
+  user_id                Int
+  business_promotion_id  Int
+  pricing_plan_id        Int
+  area_type              String
+  rank                   Int
+  rank_label             String
+  amount                 Float
+  voucher_id             Int?
+  voucher_qty_applied    Int                  @default(0)
+  voucher_value_per_unit Float                @default(0)
+  voucher_amount_applied Float                @default(0)
+  payable_amount         Float                @default(0)
+  voucher_status         String               @default("none")
+  voucher_applied_at     DateTime?
+  voucher_released_at    DateTime?
+  currency               String               @default("INR")
+  duration_days          Int
+  priority_score         Int
+  status                 String               @default("created")
+  payment_provider       String?
+  payment_order_id       String?
+  payment_id             String?
+  paid_at                DateTime?
+  activated_at           DateTime?
+  expires_at             DateTime?
+  metadata               Json?
+  created_at             DateTime             @default(now())
+  updated_at             DateTime             @updatedAt
+  business_promotion     BusinessPromotion    @relation("BusinessPromotionOrders", fields: [business_promotion_id], references: [id], onDelete: Cascade)
+  pricing_plan           PromotionPricingPlan @relation(fields: [pricing_plan_id], references: [id], onDelete: Cascade)
+  user                   User                 @relation("PromotionOrderUser", fields: [user_id], references: [id], onDelete: Cascade)
+  voucher                Voucher?             @relation("VoucherPromotionOrders", fields: [voucher_id], references: [id])
+}
+
+model AdPaymentOrder {
+  id                     Int            @id @default(autoincrement())
+  legacy_id              String?        @unique
+  user_id                Int
+  design_request_id      Int?
+  ad_id                  Int?
+  order_type             String
+  amount                 Float
+  payable_amount         Float          @default(0)
+  currency               String         @default("INR")
+  status                 String         @default("created")
+  payment_provider       String?
+  payment_order_id       String?
+  payment_id             String?
+  paid_at                DateTime?
+  voucher_id             Int?
+  voucher_qty_applied    Int            @default(0)
+  voucher_value_per_unit Float          @default(0)
+  voucher_amount_applied Float          @default(0)
+  voucher_status         String         @default("none")
+  voucher_applied_at     DateTime?
+  voucher_released_at    DateTime?
+  metadata               Json?
+  created_at             DateTime       @default(now())
+  updated_at             DateTime       @updatedAt
+  ad                     Ad?            @relation("AdPaymentOrders", fields: [ad_id], references: [id])
+  design_request         DesignRequest? @relation("DesignRequestPaymentOrders", fields: [design_request_id], references: [id])
+  user                   User           @relation("AdPaymentOrderUser", fields: [user_id], references: [id], onDelete: Cascade)
+  voucher                Voucher?       @relation("VoucherAdPaymentOrders", fields: [voucher_id], references: [id])
+}
+
+model CustomService {
+  id                     Int       @id @default(autoincrement())
+  legacy_id              String?   @unique
+  service_name           String
+  added_by               String
+  user_name              String?
+  card_legacy_id         String?
+  parent_category        String?
+  status                 String    @default("pending")
+  approved_as            String?
+  approved_category_name String?
+  approved_at            DateTime?
+  approved_by_admin      String?
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @updatedAt
+}
+
+model CreditConfig {
+  id              Int       @id @default(autoincrement())
+  legacy_id       String?   @unique
+  signup_bonus    Int       @default(200)
+  referral_reward Int       @default(300)
+  last_updated_by String?
+  last_updated_at DateTime?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+}
+
+model Enquiry {
+  id                    Int               @id @default(autoincrement())
+  legacy_id             String?           @unique
+  business_promotion_id Int
+  user_id               Int
+  user_phone            String
+  user_name             String?
+  user_email            String?
+  subject               String
+  message               String
+  status                String            @default("new")
+  priority              String            @default("low")
+  responses             Json?
+  last_response_at      DateTime?
+  last_responded_by     Int?
+  assigned_to           Int?
+  converted_to_lead     Boolean           @default(false)
+  lead_value            Float?
+  notification_sent     Boolean           @default(false)
+  notification_sent_at  DateTime?
+  created_at            DateTime          @default(now())
+  updated_at            DateTime          @updatedAt
+  business_promotion    BusinessPromotion @relation("BusinessPromotionEnquiries", fields: [business_promotion_id], references: [id], onDelete: Cascade)
+  user                  User              @relation("EnquiryUser", fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model Feedback {
+  id             Int       @id @default(autoincrement())
+  legacy_id      String?   @unique
+  user_id        Int
+  name           String
+  phone          String
+  email          String?
+  subject        String
+  message        String
+  rating         Int?
+  status         String    @default("pending")
+  admin_response String?
+  responded_at   DateTime?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+  user           User      @relation("FeedbackUser", fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model ReviewSuggestion {
+  id          Int      @id @default(autoincrement())
+  legacy_id   String?  @unique
+  rating      Int
+  category    String?
+  suggestions Json?
+  prompt      String?
+  emoji       String?
+  label       String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+}
+
+model UserLocation {
+  id                  Int       @id @default(autoincrement())
+  legacy_id           String?   @unique
+  user_id             Int       @unique
+  current_location    Json?
+  address             Json?
+  accuracy            Float?
+  last_updated        DateTime?
+  radius              Int?      @default(5000)
+  previous_locations  Json?
+  is_location_enabled Boolean   @default(true)
+  share_location_with String    @default("private")
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+  user                User      @relation("UserLocationUser", fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model Transaction {
+  id             Int      @id @default(autoincrement())
+  legacy_id      String?  @unique
+  type           String
+  transaction_id String?
+  from_user_id   Int?
+  to_user_id     Int?
+  amount         Float
+  description    String
+  note           String?
+  balance_before Float?
+  balance_after  Float?
+  related_ad_id  Int?
+  status         String   @default("completed")
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  from_user      User?    @relation("TransactionFromUser", fields: [from_user_id], references: [id])
+  related_ad     Ad?      @relation("AdTransactions", fields: [related_ad_id], references: [id])
+  to_user        User?    @relation("TransactionToUser", fields: [to_user_id], references: [id])
+}
+
+model MlmWallet {
+  id             Int      @id @default(autoincrement())
+  legacy_id      String?  @unique
+  user_id        Int      @unique
+  credit_balance Float    @default(0)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  user           User     @relation("MlmWalletUser", fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model MlmCredit {
+  id                            Int         @id @default(autoincrement())
+  legacy_id                     String?     @unique
+  sender_id                     Int
+  receiver_id                   Int
+  status                        String      @default("pending")
+  payment_status                String      @default("pending")
+  payment_confirmed_by_receiver Boolean     @default(false)
+  payment_confirmed_at          DateTime?
+  admin_approved_by             Int?
+  admin_approved_at             DateTime?
+  admin_note                    String?
+  expires_at                    DateTime
+  activated_at                  DateTime?
+  transfer_expires_at           DateTime?
+  quantity                      Int         @default(5)
+  transferred_count             Int         @default(0)
+  reverted_count                Int         @default(0)
+  source_credit_id              Int?
+  created_at                    DateTime    @default(now())
+  updated_at                    DateTime    @updatedAt
+  receiver                      User        @relation("MlmCreditReceiver", fields: [receiver_id], references: [id], onDelete: Cascade)
+  sender                        User        @relation("MlmCreditSender", fields: [sender_id], references: [id], onDelete: Cascade)
+  source_credit                 MlmCredit?  @relation("MlmCreditSource", fields: [source_credit_id], references: [id])
+  derived_credits               MlmCredit[] @relation("MlmCreditSource")
+}
+
+model MlmTransfer {
+  id                     Int             @id @default(autoincrement())
+  legacy_id              String?         @unique
+  sender_id              Int
+  receiver_id            Int
+  voucher_id             Int?
+  source_slot_id         Int?
+  amount                 Float
+  slot_count             Int             @default(5)
+  slot_amount            Float
+  slots                  Json?
+  required_voucher_count Int             @default(5)
+  baseline_voucher_count Int             @default(0)
+  current_voucher_count  Int             @default(0)
+  unlocked_slots         Int             @default(0)
+  timer_started_at       DateTime
+  expires_at             DateTime
+  unlocked_at            DateTime?
+  returned_at            DateTime?
+  return_reason          String?
+  status                 String          @default("pending_unlock")
+  created_at             DateTime        @default(now())
+  updated_at             DateTime        @updatedAt
+  receiver               User            @relation("MlmTransferReceiver", fields: [receiver_id], references: [id], onDelete: Cascade)
+  sender                 User            @relation("MlmTransferSender", fields: [sender_id], references: [id], onDelete: Cascade)
+  source_slot            SpecialCredit?  @relation("MlmTransferSourceSlot", fields: [source_slot_id], references: [id])
+  voucher                Voucher?        @relation("VoucherMlmTransfers", fields: [voucher_id], references: [id])
+  special_credits        SpecialCredit[] @relation("SpecialCreditTransfer")
+}
+
+model SpecialCredit {
+  id                    Int             @id @default(autoincrement())
+  legacy_id             String?         @unique
+  owner_id              Int
+  voucher_id            Int?
+  slot_number           Int
+  credit_amount         Float
+  status                String          @default("available")
+  recipient_id          Int?
+  recipient_name        String?
+  recipient_phone       String?
+  sent_at               DateTime?
+  expires_at            DateTime?
+  is_locked             Boolean         @default(false)
+  lock_reason           String?
+  lock_expires_at       DateTime?
+  unlocked_at           DateTime?
+  transfer_id           Int?
+  source_slot_id        Int?
+  level                 Int             @default(0)
+  created_at            DateTime        @default(now())
+  updated_at            DateTime        @updatedAt
+  source_slot_transfers MlmTransfer[]   @relation("MlmTransferSourceSlot")
+  owner                 User            @relation("SpecialCreditOwner", fields: [owner_id], references: [id], onDelete: Cascade)
+  source_slot           SpecialCredit?  @relation("SpecialCreditSource", fields: [source_slot_id], references: [id])
+  derived_slots         SpecialCredit[] @relation("SpecialCreditSource")
+  transfer              MlmTransfer?    @relation("SpecialCreditTransfer", fields: [transfer_id], references: [id])
+  voucher               Voucher?        @relation("VoucherSpecialCredits", fields: [voucher_id], references: [id])
+}
+
+model NetworkEvent {
+  id         Int      @id @default(autoincrement())
+  legacy_id  String?  @unique
+  user_id    Int?
+  event_type String
+  payload    Json?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  user       User?    @relation("NetworkEventUser", fields: [user_id], references: [id])
+}
+
+model NetworkRules {
+  id         Int      @id @default(autoincrement())
+  legacy_id  String?  @unique
+  rules      Json?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model SlotEvent {
+  id         Int      @id @default(autoincrement())
+  legacy_id  String?  @unique
+  user_id    Int?
+  event_type String
+  payload    Json?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  user       User?    @relation("SlotEventUser", fields: [user_id], references: [id])
+}
+
+model TempMessage {
+  id         Int      @id @default(autoincrement())
+  legacy_id  String?  @unique
+  payload    Json?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model Designer {
+  id         Int              @id @default(autoincrement())
+  legacy_id  String?          @unique
+  username   String           @unique
+  password   String
+  created_at DateTime         @default(now())
+  updated_at DateTime         @updatedAt
+  requests   DesignRequest[]
+  uploads    DesignerUpload[]
+}
+
+model DesignRequest {
+  id                      Int              @id @default(autoincrement())
+  legacy_id               String?          @unique
+  business_name           String?
+  email                   String?
+  web_links               String[]         @default([])
+  phone_number            String?
+  ad_text                 String?
+  business_address        String?
+  ad_type                 String
+  channel_type            String           @default("withoutChannel")
+  reference_images_gridfs String[]         @default([])
+  reference_videos_gridfs String[]         @default([])
+  reference_images_s3     Json?
+  reference_videos_s3     Json?
+  uploader_phone          String
+  uploader_name           String?
+  user_legacy_id          String?
+  status                  String           @default("pending")
+  admin_notes             String?
+  assigned_designer_id    Int?
+  assigned_designer_name  String?
+  assigned_at             DateTime?
+  completed_ad_id         Int?
+  payment_status          String           @default("pending")
+  payment_order_id        Int?
+  paid_at                 DateTime?
+  created_at              DateTime         @default(now())
+  updated_at              DateTime         @updatedAt
+  payment_orders          AdPaymentOrder[] @relation("DesignRequestPaymentOrders")
+  assigned_designer       Designer?        @relation(fields: [assigned_designer_id], references: [id])
+  completed_ad            Ad?              @relation("DesignRequestCompletedAd", fields: [completed_ad_id], references: [id])
+  uploads                 DesignerUpload[]
+}
+
+model DesignerUpload {
+  id                Int           @id @default(autoincrement())
+  legacy_id         String?       @unique
+  design_request_id Int
+  designer_id       Int
+  designer_name     String
+  files_s3          Json?
+  notes             String?
+  status            String        @default("uploaded")
+  admin_notes       String?
+  user_feedback     String?
+  created_at        DateTime      @default(now())
+  updated_at        DateTime      @updatedAt
+  design_request    DesignRequest @relation(fields: [design_request_id], references: [id], onDelete: Cascade)
+  designer          Designer      @relation(fields: [designer_id], references: [id], onDelete: Cascade)
+}
+
+model VoucherRedemption {
+  id         Int      @id @default(autoincrement())
+  legacy_id  String?  @unique
+  voucher_id Int
+  used_at    DateTime @default(now())
+  used_by_id Int?
+  used_by    User?    @relation("VoucherRedemptionUser", fields: [used_by_id], references: [id])
+  voucher    Voucher  @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
+}
+
+model VoucherTransferLog {
+  id             Int      @id @default(autoincrement())
+  legacy_id      String?  @unique
+  voucher_id     Int
+  from_user_id   Int?
+  to_user_id     Int?
+  transferred_at DateTime @default(now())
+  from_user      User?    @relation("VoucherTransferLogFrom", fields: [from_user_id], references: [id])
+  to_user        User?    @relation("VoucherTransferLogTo", fields: [to_user_id], references: [id])
+  voucher        Voucher  @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
+}
+
+model AdCampaign {
+  id               Int           @id @default(autoincrement())
+  user_id          Int
+  business_card_id Int?
+  title            String
+  description      String?
+  ad_type          String        @default("banner")
+  cta              String?
+  creative_url     String?
+  creative_urls    String[]      @default([])
+  target_city      String?
+  target_age       String?
+  target_interests String?
+  daily_budget     Float         @default(100)
+  duration_days    Int           @default(7)
+  total_budget     Float?
+  impressions      Int           @default(0)
+  clicks           Int           @default(0)
+  spent            Float         @default(0)
+  status           String        @default("active")
+  approval_status  String        @default("pending")
+  start_date       DateTime      @default(now())
+  end_date         DateTime?
+  created_at       DateTime      @default(now())
+  updated_at       DateTime      @updatedAt
+  phone            String?
+  business         BusinessCard? @relation("BusinessCardAdCampaigns", fields: [business_card_id], references: [id])
+  user             User          @relation("UserAdCampaigns", fields: [user_id], references: [id], onDelete: Cascade)
+  variants         AdVariant[]
+
+  @@map("ad_campaigns")
+}
+
+model AdVariant {
+  id           Int        @id @default(autoincrement())
+  campaign_id  Int
+  creative_url String
+  label        String
+  impressions  Int        @default(0)
+  clicks       Int        @default(0)
+  created_at   DateTime   @default(now())
+  campaign     AdCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+
+  @@map("ad_variants")
+}
 
 enum Role {
   customer
@@ -60,1554 +1499,4 @@ enum MessageType {
   image
   file
   location
-}
-
-// ============== MODELS ==============
-
-// 1. Users
-model User {
-  id            Int      @id @default(autoincrement())
-  legacy_id     String?  @unique
-  email         String?  @unique
-  phone         String   @unique
-  password_hash String?
-  name          String?
-  profile_picture String?
-  about         String?
-  gender        String?
-  birthdate     DateTime?
-  anniversary   DateTime?
-  push_token    String?
-  platform      String?
-  push_token_updated_at DateTime?
-  credits       BigInt?  @default(0)
-  credits_expiry_date DateTime?
-  referral_code String?  @unique
-  referred_by_id Int?
-  service_type  String?
-  quiz_progress Json?
-  parent_id     Int?
-  level         Int      @default(0)
-  direct_count  Int      @default(0)
-  downline_count Int     @default(0)
-  special_credits Json?
-  is_voucher_admin Boolean @default(false)
-  voucher_balance BigInt  @default(0)
-  voucher_balances Json?
-  ancestors     Json?
-  needs_email   Boolean  @default(true)
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
-
-  profile             Profile? @relation("UserProfile")
-  user_roles          UserRole[] @relation("UserRoles")
-  business_cards      BusinessCard[]
-  bookings            Booking[]
-  reviews             Review[]
-  voucher_claims      VoucherClaim[]
-  sent_transfers      VoucherTransfer[]   @relation("sender")
-  received_transfers  VoucherTransfer[]   @relation("recipient")
-  event_registrations EventRegistration[]
-  notifications       Notification[] @relation("UserNotifications")
-  sent_messages       Message[]           @relation("sender")
-  received_messages   Message[]           @relation("receiver")
-  favorites           Favorite[]
-  ad_impressions      AdImpression[]
-  ad_clicks           AdClick[]
-  loyalty_points      LoyaltyPoint[] @relation("UserLoyaltyPoints")
-  referrals_made      Referral[]          @relation("referrer")
-  referrals_received  Referral[]          @relation("referred")
-  campaigns           Campaign[]
-  activity_logs       ActivityLog[]
-  synced_contacts     SyncedContact[] @relation("SyncedContactOwner")
-  synced_contacts_app_user SyncedContact[] @relation("SyncedContactAppUser")
-  contacts            Contact[] @relation("ContactOwner")
-  contacts_app_user   Contact[] @relation("ContactAppUser")
-  admin_permissions   AdminPermission[]
-  admin_invites_sent  AdminAccessInvite[]
-  chat_participants   ChatParticipant[] @relation("ChatParticipantUser")
-  group_members       GroupMember[] @relation("GroupMemberUser")
-  groups_admin        Group[] @relation("GroupAdmin")
-  group_calls_initiated GroupCall[] @relation("GroupCallInitiator")
-  group_call_participants GroupCallParticipant[] @relation("GroupCallParticipantUser")
-  business_promotions BusinessPromotion[] @relation("BusinessPromotionUser")
-  promotion_orders    PromotionOrder[] @relation("PromotionOrderUser")
-  ad_payment_orders   AdPaymentOrder[] @relation("AdPaymentOrderUser")
-  enquiries           Enquiry[] @relation("EnquiryUser")
-  feedbacks           Feedback[] @relation("FeedbackUser")
-  user_location       UserLocation? @relation("UserLocationUser")
-  transactions_sent   Transaction[] @relation("TransactionFromUser")
-  transactions_received Transaction[] @relation("TransactionToUser")
-  mlm_wallet          MlmWallet? @relation("MlmWalletUser")
-  mlm_credits_sent    MlmCredit[] @relation("MlmCreditSender")
-  mlm_credits_received MlmCredit[] @relation("MlmCreditReceiver")
-  mlm_transfers_sent  MlmTransfer[] @relation("MlmTransferSender")
-  mlm_transfers_received MlmTransfer[] @relation("MlmTransferReceiver")
-  special_credit_slots SpecialCredit[] @relation("SpecialCreditOwner")
-  network_events      NetworkEvent[] @relation("NetworkEventUser")
-  slot_events         SlotEvent[] @relation("SlotEventUser")
-  voucher_redemptions VoucherRedemption[] @relation("VoucherRedemptionUser")
-  voucher_transfer_logs_from VoucherTransferLog[] @relation("VoucherTransferLogFrom")
-  voucher_transfer_logs_to VoucherTransferLog[] @relation("VoucherTransferLogTo")
-  vouchers_owned      Voucher[] @relation("VoucherOwner")
-  vouchers_original   Voucher[] @relation("VoucherOriginalOwner")
-  vouchers_created    Voucher[] @relation("VoucherAdmin")
-  vouchers_transferred_from Voucher[] @relation("VoucherTransferredFrom")
-  refresh_tokens RefreshToken[] @relation("UserRefreshTokens")
-  ad_campaigns   AdCampaign[] @relation("UserAdCampaigns")
-
-  referred_by   User? @relation("UserReferrals", fields: [referred_by_id], references: [id], onDelete: SetNull)
-  referred_users User[] @relation("UserReferrals")
-  parent_user   User? @relation("UserParent", fields: [parent_id], references: [id], onDelete: SetNull)
-  child_users   User[] @relation("UserParent")
-
-}
-
-// 2. Profiles
-model Profile {
-  id         Int     @id @default(autoincrement())
-  legacy_id  String? @unique
-  user_id    Int     @unique
-  full_name  String?
-  phone      String?
-  avatar_url String?
-  location   String?
-  bio        String?
-
-  user User @relation("UserProfile", fields: [user_id], references: [id], onDelete: Cascade)
-}
-
-// 3. User Roles
-model UserRole {
-  id      Int  @id @default(autoincrement())
-  user_id Int
-  role    Role
-
-  user User @relation("UserRoles", fields: [user_id], references: [id], onDelete: Cascade)
-}
-
-// 3b. Refresh Tokens
-model RefreshToken {
-  id         Int      @id @default(autoincrement())
-  user_id    Int
-  token_hash String
-  expires_at DateTime
-  created_at DateTime @default(now())
-
-  user User @relation("UserRefreshTokens", fields: [user_id], references: [id], onDelete: Cascade)
-}
-
-// 4. Business Cards
-model BusinessCard {
-  id               Int      @id @default(autoincrement())
-  legacy_id        String?  @unique
-  user_id          Int
-  full_name        String
-  gender           String?
-  birthdate        DateTime?
-  anniversary      DateTime?
-  personal_country_code String?
-  personal_phone   String?
-  phone            String?
-  email            String?
-  company_name     String?
-  job_title        String?
-  logo_url         String?
-  description      String?
-  category         String?
-  services         String[] @default([])
-  services_offered String?
-  instagram        String?
-  facebook         String?
-  linkedin         String?
-  youtube          String?
-  twitter          String?
-  whatsapp         String?
-  telegram         String?
-  website          String?
-  business_hours   String?
-  location         String?
-  maps_link        String?
-  company_country_code String?
-  company_phone    String?
-  company_email    String?
-  company_website  String?
-  company_address  String?
-  company_maps_link String?
-  message          String?
-  company_photo    String?
-  about_business   String?
-  offer            String?
-  keywords         String?
-  established_year String?
-  is_default       Boolean  @default(false)
-  approval_status  String   @default("pending")
-  is_live          Boolean  @default(true)
-  latitude         Float?
-  longitude        Float?
-  service_mode     String?
-  created_at       DateTime @default(now())
-  updated_at       DateTime @updatedAt
-
-  user               User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  bookings           Booking[]
-  reviews            Review[]
-  vouchers           Voucher[]
-  events             Event[]
-  favorites          Favorite[]
-  ads                Ad[]
-  ad_campaigns       AdCampaign[] @relation("BusinessCardAdCampaigns")
-  leads              Lead[]
-  card_analytics     CardAnalytic[]
-  business_locations BusinessLocation[]
-  business_staff     BusinessStaff[]
-  business_photos    BusinessPhoto[]
-  company_phones     BusinessCardPhone[]
-  categories         BusinessCardCategory[]
-  promotions         BusinessPromotion[] @relation("BusinessCardPromotions")
-  card_shares        CardShare[] @relation("BusinessCardShares")
-  shared_cards       SharedCard[] @relation("BusinessCardSharedCards")
-  group_shared_cards GroupSharedCard[] @relation("BusinessCardGroupSharedCards")
-
-  @@index([user_id])
-  @@index([created_at])
-  @@index([category])
-  @@index([company_name])
-  @@index([full_name])
-}
-
-// 5. Bookings
-model Booking {
-  id             Int           @id @default(autoincrement())
-  legacy_id      String?       @unique
-  user_id        Int
-  business_id    Int
-  business_name  String
-  mode           BookingMode
-  booking_date   DateTime
-  booking_time   String
-  customer_name  String
-  customer_phone String
-  notes          String?
-  status         BookingStatus @default(pending)
-  created_at     DateTime      @default(now())
-
-  user     User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  business BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
-
-  @@index([business_id])
-  @@index([user_id])
-  @@index([created_at])
-}
-
-// 6. Reviews
-model Review {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  user_id     Int
-  business_id Int
-  rating      Int
-  comment     String?
-  photo_url   String?
-  created_at  DateTime @default(now())
-
-  user     User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  business BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
-}
-
-// 7. Vouchers
-model Voucher {
-  id             Int       @id @default(autoincrement())
-  legacy_id      String?   @unique
-  business_id    Int?
-  business_name  String
-  title          String
-  description    String?
-  discount_type  String
-  discount_value Float
-  code           String?   @unique
-  max_claims     Int?
-  claimed_count  Int       @default(0)
-  expires_at     DateTime?
-  status         String    @default("active")
-  created_at     DateTime  @default(now())
-  updated_at     DateTime  @updatedAt
-
-  // Legacy voucher fields (Mongo)
-  owner_user_id      Int?
-  original_owner_id  Int?
-  voucher_number     String?
-  mrp                Float?
-  issue_date         DateTime?
-  expiry_date        DateTime?
-  redeemed_status    String?
-  voucher_images     String[] @default([])
-  product_video_link String?
-  redeemed_at        DateTime?
-  max_uses           Int?
-  remaining_uses     Int?
-  company_logo       String?
-  company_name       String?
-  phone_number       String?
-  address            String?
-  amount             Float?
-  discount_percentage Float?
-  validity           String?
-  voucher_image      String?
-  min_vouchers_required Int?
-  template_id        Int?
-  is_published       Boolean?
-  published_at       DateTime?
-  created_by_admin_id Int?
-  source             String?
-  transferred_from_id Int?
-  transferred_at      DateTime?
-
-  business  BusinessCard?     @relation(fields: [business_id], references: [id], onDelete: SetNull)
-  claims    VoucherClaim[]
-  transfers VoucherTransfer[]
-  owner_user User? @relation("VoucherOwner", fields: [owner_user_id], references: [id], onDelete: SetNull)
-  original_owner User? @relation("VoucherOriginalOwner", fields: [original_owner_id], references: [id], onDelete: SetNull)
-  template Voucher? @relation("VoucherTemplate", fields: [template_id], references: [id], onDelete: SetNull)
-  derived_vouchers Voucher[] @relation("VoucherTemplate")
-  created_by_admin User? @relation("VoucherAdmin", fields: [created_by_admin_id], references: [id], onDelete: SetNull)
-  transferred_from User? @relation("VoucherTransferredFrom", fields: [transferred_from_id], references: [id], onDelete: SetNull)
-  promotion_orders PromotionOrder[] @relation("VoucherPromotionOrders")
-  ad_payment_orders AdPaymentOrder[] @relation("VoucherAdPaymentOrders")
-  mlm_transfers MlmTransfer[] @relation("VoucherMlmTransfers")
-  special_credits SpecialCredit[] @relation("VoucherSpecialCredits")
-  voucher_redemptions VoucherRedemption[]
-  voucher_transfer_logs VoucherTransferLog[]
-
-  @@index([business_id])
-  @@index([status])
-  @@index([expires_at])
-}
-
-// 8. Voucher Claims
-model VoucherClaim {
-  id          Int       @id @default(autoincrement())
-  legacy_id   String?   @unique
-  voucher_id  Int
-  user_id     Int
-  claimed_at  DateTime  @default(now())
-  redeemed_at DateTime?
-
-  voucher Voucher @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
-}
-
-// 9. Voucher Transfers
-model VoucherTransfer {
-  id              Int      @id @default(autoincrement())
-  legacy_id       String?  @unique
-  voucher_id      Int
-  sender_id       Int
-  recipient_id    Int
-  sender_phone    String
-  recipient_phone String
-  transferred_at  DateTime @default(now())
-
-  voucher   Voucher @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
-  sender    User    @relation("sender", fields: [sender_id], references: [id], onDelete: Cascade)
-  recipient User    @relation("recipient", fields: [recipient_id], references: [id], onDelete: Cascade)
-}
-
-// 10. Events
-model Event {
-  id             Int      @id @default(autoincrement())
-  legacy_id      String?  @unique
-  business_id    Int
-  title          String
-  description    String?
-  date           DateTime
-  time           String
-  location       String?
-  image_url      String?
-  ticket_price   Float?
-  max_attendees  Int?
-  attendee_count Int      @default(0)
-  status         String   @default("active")
-  created_at     DateTime @default(now())
-
-  business      BusinessCard        @relation(fields: [business_id], references: [id], onDelete: Cascade)
-  registrations EventRegistration[]
-}
-
-// 11. Event Registrations
-model EventRegistration {
-  id            Int      @id @default(autoincrement())
-  legacy_id     String?  @unique
-  event_id      Int
-  user_id       Int
-  ticket_count  Int      @default(1)
-  qr_code       String?
-  payment_status String   @default("not_required")
-  payment_order_id String?
-  payment_id    String?
-  payment_signature String?
-  amount_paid   Float?
-  registered_at DateTime @default(now())
-
-  event Event @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  user  User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@index([payment_id])
-}
-
-// 12. Notifications
-model Notification {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  user_id     Int
-  title       String
-  description String?
-  type        String?
-  is_read     Boolean  @default(false)
-  created_at  DateTime @default(now())
-
-  user User @relation("UserNotifications", fields: [user_id], references: [id], onDelete: Cascade)
-}
-
-// 13. Messages
-model Message {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  sender_id   Int
-  receiver_id Int?
-  chat_id     Int?
-  group_id    Int?
-  content     String
-  message_type MessageType @default(text)
-  is_read     Boolean  @default(false)
-  read_at     DateTime?
-  is_delivered Boolean @default(false)
-  delivered_at DateTime?
-  is_pending_delivery Boolean @default(false)
-  local_message_id String?
-  conversation_id String?
-  metadata    Json?
-  is_deleted  Boolean @default(false)
-  deleted_at  DateTime?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  sender   User @relation("sender", fields: [sender_id], references: [id], onDelete: Cascade)
-  receiver User? @relation("receiver", fields: [receiver_id], references: [id], onDelete: SetNull)
-  chat     Chat? @relation("ChatMessages", fields: [chat_id], references: [id], onDelete: SetNull)
-  group    Group? @relation("GroupMessages", fields: [group_id], references: [id], onDelete: SetNull)
-  chat_last_for  Chat?  @relation("ChatLastMessage")
-  group_last_for Group? @relation("GroupLastMessage")
-}
-
-// 14. Favorites
-model Favorite {
-  id         Int      @id @default(autoincrement())
-  legacy_id  String?  @unique
-  user_id    Int
-  card_id    Int
-  created_at DateTime @default(now())
-
-  user User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  card BusinessCard @relation(fields: [card_id], references: [id], onDelete: Cascade)
-
-  @@unique([user_id, card_id])
-}
-
-// 15. Ads
-model Ad {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  business_id Int
-  title       String
-  description String?
-  image_url   String?
-  cta_url     String?
-  ad_type     AdType
-  budget      Float?
-  spent       Float    @default(0)
-  impressions Int      @default(0)
-  clicks      Int      @default(0)
-  status      String   @default("active")
-  start_date  DateTime?
-  end_date    DateTime?
-  created_at  DateTime @default(now())
-
-  // Legacy ad fields
-  bottom_image String?
-  bottom_image_gridfs String?
-  fullscreen_image String?
-  fullscreen_image_gridfs String?
-  bottom_media_type String?
-  fullscreen_media_type String?
-  bottom_video_url String?
-  fullscreen_video_url String?
-  bottom_image_s3_url String?
-  bottom_image_s3_key String?
-  fullscreen_image_s3_url String?
-  fullscreen_image_s3_key String?
-  bottom_video_s3_url String?
-  bottom_video_s3_key String?
-  fullscreen_video_s3_url String?
-  fullscreen_video_s3_key String?
-  bottom_video String?
-  bottom_video_gridfs String?
-  fullscreen_video String?
-  fullscreen_video_gridfs String?
-  ad_type_legacy String?
-  phone_number String?
-  priority    Int?   @default(5)
-  approval_status String?
-  uploaded_by String?
-  uploader_name String?
-  approved_by String?
-  approval_date DateTime?
-  rejection_reason String?
-  payment_status String?
-  payment_order_id Int?
-
-  business    BusinessCard   @relation(fields: [business_id], references: [id], onDelete: Cascade)
-  ad_impressions AdImpression[]
-  ad_clicks      AdClick[]
-  payment_orders AdPaymentOrder[] @relation("AdPaymentOrders")
-  transactions   Transaction[] @relation("AdTransactions")
-  completed_design_requests DesignRequest[] @relation("DesignRequestCompletedAd")
-}
-
-// 16. Ad Impressions
-model AdImpression {
-  id         Int      @id @default(autoincrement())
-  legacy_id  String?  @unique
-  ad_id      Int
-  user_id    Int?
-  created_at DateTime @default(now())
-
-  ad   Ad    @relation(fields: [ad_id], references: [id], onDelete: Cascade)
-  user User? @relation(fields: [user_id], references: [id], onDelete: SetNull)
-}
-
-// 17. Ad Clicks
-model AdClick {
-  id         Int      @id @default(autoincrement())
-  legacy_id  String?  @unique
-  ad_id      Int
-  user_id    Int?
-  created_at DateTime @default(now())
-
-  ad   Ad    @relation(fields: [ad_id], references: [id], onDelete: Cascade)
-  user User? @relation(fields: [user_id], references: [id], onDelete: SetNull)
-}
-
-// 18. Leads
-model Lead {
-  id             Int        @id @default(autoincrement())
-  legacy_id      String?    @unique
-  business_id    Int
-  customer_name  String
-  customer_phone String?
-  customer_email String?
-  message        String?
-  status         LeadStatus @default(new)
-  created_at     DateTime   @default(now())
-
-  business BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
-}
-
-// 19. Loyalty Points
-model LoyaltyPoint {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  user_id     Int
-  points      Int
-  action      String
-  description String?
-  created_at  DateTime @default(now())
-
-  user User @relation("UserLoyaltyPoints", fields: [user_id], references: [id], onDelete: Cascade)
-}
-
-// 20. Referrals
-model Referral {
-  id           Int      @id @default(autoincrement())
-  legacy_id    String?  @unique
-  referrer_id  Int
-  referred_id  Int
-  status       String   @default("pending")
-  reward_given Boolean  @default(false)
-  created_at   DateTime @default(now())
-
-  referrer User @relation("referrer", fields: [referrer_id], references: [id], onDelete: Cascade)
-  referred User @relation("referred", fields: [referred_id], references: [id], onDelete: Cascade)
-}
-
-// 21. Campaigns
-model Campaign {
-  id              Int      @id @default(autoincrement())
-  legacy_id       String?  @unique
-  admin_id        Int
-  title           String
-  body            String?
-  campaign_type   String?
-  target_audience String?
-  status          String   @default("draft")
-  sent_count      Int      @default(0)
-  created_at      DateTime @default(now())
-
-  admin User @relation(fields: [admin_id], references: [id], onDelete: Cascade)
-}
-
-// 22. Activity Logs
-model ActivityLog {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  event_type  String
-  entity_type String?
-  entity_id   Int?
-  metadata    Json?
-  admin_id    Int?
-  created_at  DateTime @default(now())
-
-  admin User? @relation(fields: [admin_id], references: [id], onDelete: SetNull)
-}
-
-// 23. Admin Alerts
-model AdminAlert {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  alert_type  String
-  severity    Severity
-  title       String
-  message     String?
-  entity_id   Int?
-  is_resolved Boolean  @default(false)
-  created_at  DateTime @default(now())
-}
-
-// 24. Admin Metrics Daily
-model AdminMetricDaily {
-  id                 Int      @id @default(autoincrement())
-  metric_date        DateTime @unique
-  total_users        Int      @default(0)
-  total_businesses   Int      @default(0)
-  total_bookings     Int      @default(0)
-  total_revenue      Float    @default(0)
-  pending_approvals  Int      @default(0)
-  active_ads         Int      @default(0)
-  new_signups_7d     Int      @default(0)
-  computed_at        DateTime @default(now())
-}
-
-// 25. Spam Flags
-model SpamFlag {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  flag_type   String
-  entity_type String
-  entity_id   Int
-  reason      String?
-  is_resolved Boolean  @default(false)
-  created_at  DateTime @default(now())
-}
-
-// 26. Synced Contacts
-model SyncedContact {
-  id           Int      @id @default(autoincrement())
-  legacy_id    String?  @unique
-  user_id      Int
-  phone_number String
-  contact_name String?
-  is_app_user  Boolean  @default(false)
-  app_user_id  Int?
-  last_synced  DateTime @default(now())
-  created_at   DateTime @default(now())
-
-  user User @relation("SyncedContactOwner", fields: [user_id], references: [id], onDelete: Cascade)
-  app_user User? @relation("SyncedContactAppUser", fields: [app_user_id], references: [id], onDelete: SetNull)
-
-  @@unique([user_id, phone_number])
-}
-
-// 27. Card Analytics
-model CardAnalytic {
-  id              Int      @id @default(autoincrement())
-  legacy_id       String?  @unique
-  card_id         Int
-  views           Int      @default(0)
-  shares          Int      @default(0)
-  saves           Int      @default(0)
-  whatsapp_clicks Int      @default(0)
-  call_clicks     Int      @default(0)
-  created_at      DateTime @default(now())
-
-  card BusinessCard @relation(fields: [card_id], references: [id], onDelete: Cascade)
-}
-
-// 28. Business Locations
-model BusinessLocation {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  business_id Int
-  label       String?
-  address     String
-  lat         Float?
-  lng         Float?
-  is_primary  Boolean  @default(false)
-
-  business BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
-}
-
-// 29. Business Staff
-model BusinessStaff {
-  id          Int     @id @default(autoincrement())
-  legacy_id   String? @unique
-  business_id Int
-  name        String
-  role        String?
-  phone       String?
-  email       String?
-
-  business BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
-}
-
-// 30. Business Photos
-model BusinessPhoto {
-  id          Int     @id @default(autoincrement())
-  legacy_id   String? @unique
-  business_id Int
-  photo_url   String
-  caption     String?
-  sort_order  Int     @default(0)
-
-  business BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
-}
-
-// 31. Admin Permissions
-model AdminPermission {
-  id                  Int     @id @default(autoincrement())
-  legacy_id           String? @unique
-  admin_user_id       Int
-  permission_category String
-  can_view            Boolean @default(false)
-  can_edit            Boolean @default(false)
-  can_delete          Boolean @default(false)
-  can_approve         Boolean @default(false)
-
-  admin User @relation(fields: [admin_user_id], references: [id], onDelete: Cascade)
-}
-
-// 32. Admin Access Invites
-model AdminAccessInvite {
-  id            Int          @id @default(autoincrement())
-  legacy_id     String?      @unique
-  invited_email String
-  access_level  String
-  invited_by    Int
-  status        InviteStatus @default(pending)
-  created_at    DateTime     @default(now())
-
-  inviter User @relation(fields: [invited_by], references: [id], onDelete: Cascade)
-}
-
-// ===== Legacy + Extended Models (Mongo parity) =====
-
-model Category {
-  id           Int      @id @default(autoincrement())
-  legacy_id    String?  @unique
-  name         String
-  icon         String?
-  parent_id    Int?
-  level        Int      @default(0)
-  subcategories String[] @default([])
-  is_active    Boolean  @default(true)
-  sort_order   Int      @default(0)
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
-
-  parent   Category? @relation("CategoryParent", fields: [parent_id], references: [id], onDelete: SetNull)
-  children Category[] @relation("CategoryParent")
-  business_cards BusinessCardCategory[]
-}
-
-model BusinessCardCategory {
-  id               Int @id @default(autoincrement())
-  business_card_id Int
-  category_id      Int
-
-  business_card BusinessCard @relation(fields: [business_card_id], references: [id], onDelete: Cascade)
-  category      Category     @relation(fields: [category_id], references: [id], onDelete: Cascade)
-
-  @@unique([business_card_id, category_id])
-}
-
-model BusinessCardPhone {
-  id               Int @id @default(autoincrement())
-  business_card_id Int
-  country_code     String?
-  phone            String?
-
-  business_card BusinessCard @relation(fields: [business_card_id], references: [id], onDelete: Cascade)
-}
-
-model Contact {
-  id           Int      @id @default(autoincrement())
-  legacy_id    String?  @unique
-  user_id      Int
-  name         String
-  phone_number String
-  is_app_user  Boolean  @default(false)
-  app_user_id  Int?
-  last_synced  DateTime @default(now())
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
-
-  user     User  @relation("ContactOwner", fields: [user_id], references: [id], onDelete: Cascade)
-  app_user User? @relation("ContactAppUser", fields: [app_user_id], references: [id], onDelete: SetNull)
-
-  @@unique([user_id, phone_number])
-}
-
-model Chat {
-  id                Int      @id @default(autoincrement())
-  legacy_id         String?  @unique
-  is_group          Boolean  @default(false)
-  group_id          Int?
-  last_message_id   Int?     @unique
-  last_message_time DateTime @default(now())
-  is_active         Boolean  @default(true)
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
-
-  group        Group?   @relation("GroupChats", fields: [group_id], references: [id], onDelete: SetNull)
-  last_message Message? @relation("ChatLastMessage", fields: [last_message_id], references: [id], onDelete: SetNull)
-  participants ChatParticipant[] @relation("ChatParticipants")
-  messages     Message[] @relation("ChatMessages")
-}
-
-model ChatParticipant {
-  id            Int      @id @default(autoincrement())
-  chat_id       Int
-  user_id       Int
-  unread_count  Int      @default(0)
-  is_muted      Boolean  @default(false)
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
-
-  chat Chat @relation("ChatParticipants", fields: [chat_id], references: [id], onDelete: Cascade)
-  user User @relation("ChatParticipantUser", fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@unique([chat_id, user_id])
-}
-
-model Group {
-  id                Int      @id @default(autoincrement())
-  legacy_id         String?  @unique
-  name              String
-  description       String?
-  icon              String?
-  admin_id          Int
-  join_code         String?  @unique
-  last_message_id   Int?     @unique
-  last_message_time DateTime @default(now())
-  is_active         Boolean  @default(true)
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
-
-  admin       User   @relation("GroupAdmin", fields: [admin_id], references: [id], onDelete: Cascade)
-  last_message Message? @relation("GroupLastMessage", fields: [last_message_id], references: [id], onDelete: SetNull)
-  members     GroupMember[] @relation("GroupMembers")
-  messages    Message[] @relation("GroupMessages")
-  chats       Chat[] @relation("GroupChats")
-  group_calls GroupCall[] @relation("GroupCalls")
-  shared_cards GroupSharedCard[] @relation("GroupSharedCards")
-}
-
-model GroupMember {
-  id         Int      @id @default(autoincrement())
-  group_id   Int
-  user_id    Int
-  role       String   @default("member")
-  is_muted   Boolean  @default(false)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  group Group @relation("GroupMembers", fields: [group_id], references: [id], onDelete: Cascade)
-  user  User  @relation("GroupMemberUser", fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@unique([group_id, user_id])
-}
-
-model GroupCall {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  call_id     String   @unique
-  group_id    Int
-  initiator_id Int
-  call_type   String   @default("audio")
-  start_time  DateTime @default(now())
-  end_time    DateTime?
-  status      String   @default("ringing")
-  duration    Int?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  group     Group @relation("GroupCalls", fields: [group_id], references: [id], onDelete: Cascade)
-  initiator User  @relation("GroupCallInitiator", fields: [initiator_id], references: [id], onDelete: Cascade)
-  participants GroupCallParticipant[] @relation("GroupCallParticipants")
-}
-
-model GroupCallParticipant {
-  id            Int      @id @default(autoincrement())
-  group_call_id Int
-  user_id       Int
-  joined_at     DateTime @default(now())
-  left_at       DateTime?
-  is_initiator  Boolean  @default(false)
-
-  group_call GroupCall @relation("GroupCallParticipants", fields: [group_call_id], references: [id], onDelete: Cascade)
-  user       User      @relation("GroupCallParticipantUser", fields: [user_id], references: [id], onDelete: Cascade)
-}
-
-model GroupSession {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  code        String   @unique
-  admin_id    String
-  admin_name  String
-  admin_phone String
-  admin_photo String?
-  status      String   @default("waiting")
-  allow_participant_sharing Boolean @default(false)
-  created_at  DateTime @default(now())
-  expires_at  DateTime
-  is_active   Boolean  @default(true)
-
-  participants GroupSessionParticipant[]
-  card_shares  CardShare[] @relation("GroupSessionCardShares")
-}
-
-model GroupSessionParticipant {
-  id               Int      @id @default(autoincrement())
-  group_session_id Int
-  user_id          String
-  user_name        String
-  user_phone       String
-  photo            String?
-  joined_at        DateTime @default(now())
-  cards_to_share   Json?
-  default_card_legacy_id String?
-  is_online        Boolean  @default(true)
-
-  session GroupSession @relation(fields: [group_session_id], references: [id], onDelete: Cascade)
-}
-
-model CardShare {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  session_id  Int
-  from_user_id String
-  to_user_id   String
-  card_id     Int?
-  shared_at   DateTime @default(now())
-
-  session GroupSession @relation("GroupSessionCardShares", fields: [session_id], references: [id], onDelete: Cascade)
-  card    BusinessCard? @relation("BusinessCardShares", fields: [card_id], references: [id], onDelete: SetNull)
-}
-
-model SharedCard {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  card_id     Int
-  sender_id   String
-  recipient_id String
-  message     String?
-  status      String   @default("sent")
-  sent_at     DateTime @default(now())
-  viewed_at   DateTime?
-  card_title  String
-  sender_name String
-  recipient_name String
-  card_photo  String?
-  sender_profile_picture String?
-  recipient_profile_picture String?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  card BusinessCard @relation("BusinessCardSharedCards", fields: [card_id], references: [id], onDelete: Cascade)
-}
-
-model GroupSharedCard {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  card_id     Int
-  sender_id   String
-  group_id    Int
-  message     String?
-  sent_at     DateTime @default(now())
-  card_title  String
-  sender_name String
-  group_name  String
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  card  BusinessCard @relation("BusinessCardGroupSharedCards", fields: [card_id], references: [id], onDelete: Cascade)
-  group Group        @relation("GroupSharedCards", fields: [group_id], references: [id], onDelete: Cascade)
-}
-
-model BusinessPromotion {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  user_id     Int
-  business_card_id Int?
-  business_name String
-  owner_name    String
-  description   String?
-  category      String[] @default([])
-  email         String?
-  phone         String?
-  whatsapp      String?
-  website       String?
-  business_hours Json?
-  area          String?
-  pincode       String?
-  plot_no       String?
-  building_name String?
-  street_name   String?
-  landmark      String?
-  city          String?
-  state         String?
-  gst_number    String?
-  pan_number    String?
-  listing_type  String   @default("free")
-  listing_intent String  @default("free")
-  status        String   @default("draft")
-  current_step  String?
-  progress      Int      @default(0)
-  step_index    Int      @default(1)
-  plan_name     String?
-  plan_price    Float?
-  plan_duration_days Int?
-  plan_activated_at DateTime?
-  payment_status String  @default("not_required")
-  payment_id    String?
-  visibility_priority_score Int @default(10)
-  visibility_impressions Int @default(0)
-  visibility_clicks Int @default(0)
-  visibility_leads Int @default(0)
-  visibility_call_clicks Int @default(0)
-  visibility_whatsapp_clicks Int @default(0)
-  media          Json?
-  is_active      Boolean @default(false)
-  expiry_date    DateTime?
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
-
-  user         User @relation("BusinessPromotionUser", fields: [user_id], references: [id], onDelete: Cascade)
-  business_card BusinessCard? @relation("BusinessCardPromotions", fields: [business_card_id], references: [id], onDelete: SetNull)
-  promotion_orders PromotionOrder[] @relation("BusinessPromotionOrders")
-  enquiries Enquiry[] @relation("BusinessPromotionEnquiries")
-
-  @@index([user_id])
-  @@index([business_card_id])
-  @@index([listing_type])
-  @@index([status])
-  @@index([is_active])
-  @@index([created_at])
-  @@index([city])
-  @@index([state])
-  @@index([category], type: Gin)
-}
-
-model PromotionPricingPlan {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  code        String   @unique
-  area_type   String
-  rank        Int
-  rank_label  String
-  amount      Float
-  currency    String   @default("INR")
-  duration_days Int   @default(30)
-  priority_score Int  @default(10)
-  is_active   Boolean @default(true)
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  orders PromotionOrder[]
-}
-
-model PromotionOrder {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  user_id     Int
-  business_promotion_id Int
-  pricing_plan_id Int
-  area_type   String
-  rank        Int
-  rank_label  String
-  amount      Float
-  voucher_id  Int?
-  voucher_qty_applied Int @default(0)
-  voucher_value_per_unit Float @default(0)
-  voucher_amount_applied Float @default(0)
-  payable_amount Float @default(0)
-  voucher_status String @default("none")
-  voucher_applied_at DateTime?
-  voucher_released_at DateTime?
-  currency    String   @default("INR")
-  duration_days Int
-  priority_score Int
-  status      String   @default("created")
-  payment_provider String?
-  payment_order_id String?
-  payment_id   String?
-  paid_at      DateTime?
-  activated_at DateTime?
-  expires_at   DateTime?
-  metadata     Json?
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
-
-  user User @relation("PromotionOrderUser", fields: [user_id], references: [id], onDelete: Cascade)
-  business_promotion BusinessPromotion @relation("BusinessPromotionOrders", fields: [business_promotion_id], references: [id], onDelete: Cascade)
-  pricing_plan PromotionPricingPlan @relation(fields: [pricing_plan_id], references: [id], onDelete: Cascade)
-  voucher Voucher? @relation("VoucherPromotionOrders", fields: [voucher_id], references: [id], onDelete: SetNull)
-}
-
-model AdPaymentOrder {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  user_id     Int
-  design_request_id Int?
-  ad_id       Int?
-  order_type  String
-  amount      Float
-  payable_amount Float @default(0)
-  currency    String   @default("INR")
-  status      String   @default("created")
-  payment_provider String?
-  payment_order_id String?
-  payment_id   String?
-  paid_at      DateTime?
-  voucher_id   Int?
-  voucher_qty_applied Int @default(0)
-  voucher_value_per_unit Float @default(0)
-  voucher_amount_applied Float @default(0)
-  voucher_status String @default("none")
-  voucher_applied_at DateTime?
-  voucher_released_at DateTime?
-  metadata     Json?
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
-
-  user User @relation("AdPaymentOrderUser", fields: [user_id], references: [id], onDelete: Cascade)
-  design_request DesignRequest? @relation("DesignRequestPaymentOrders", fields: [design_request_id], references: [id], onDelete: SetNull)
-  ad Ad? @relation("AdPaymentOrders", fields: [ad_id], references: [id], onDelete: SetNull)
-  voucher Voucher? @relation("VoucherAdPaymentOrders", fields: [voucher_id], references: [id], onDelete: SetNull)
-}
-
-model CustomService {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  service_name String
-  added_by    String
-  user_name   String?
-  card_legacy_id String?
-  parent_category String?
-  status      String   @default("pending")
-  approved_as String?
-  approved_category_name String?
-  approved_at DateTime?
-  approved_by_admin String?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-}
-
-model CreditConfig {
-  id            Int      @id @default(autoincrement())
-  legacy_id     String?  @unique
-  signup_bonus  Int      @default(200)
-  referral_reward Int    @default(300)
-  last_updated_by String?
-  last_updated_at DateTime?
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
-}
-
-model Enquiry {
-  id           Int      @id @default(autoincrement())
-  legacy_id    String?  @unique
-  business_promotion_id Int
-  user_id      Int
-  user_phone   String
-  user_name    String?
-  user_email   String?
-  subject      String
-  message      String
-  status       String   @default("new")
-  priority     String   @default("low")
-  responses    Json?
-  last_response_at DateTime?
-  last_responded_by Int?
-  assigned_to  Int?
-  converted_to_lead Boolean @default(false)
-  lead_value   Float?
-  notification_sent Boolean @default(false)
-  notification_sent_at DateTime?
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
-
-  business_promotion BusinessPromotion @relation("BusinessPromotionEnquiries", fields: [business_promotion_id], references: [id], onDelete: Cascade)
-  user User @relation("EnquiryUser", fields: [user_id], references: [id], onDelete: Cascade)
-}
-
-model Feedback {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  user_id     Int
-  name        String
-  phone       String
-  email       String?
-  subject     String
-  message     String
-  rating      Int?
-  status      String   @default("pending")
-  admin_response String?
-  responded_at DateTime?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  user User @relation("FeedbackUser", fields: [user_id], references: [id], onDelete: Cascade)
-}
-
-model ReviewSuggestion {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  rating      Int
-  category    String?
-  suggestions Json?
-  prompt      String?
-  emoji       String?
-  label       String?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-}
-
-model UserLocation {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  user_id     Int      @unique
-  current_location Json?
-  address     Json?
-  accuracy    Float?
-  last_updated DateTime?
-  radius      Int?     @default(5000)
-  previous_locations Json?
-  is_location_enabled Boolean @default(true)
-  share_location_with String  @default("private")
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  user User @relation("UserLocationUser", fields: [user_id], references: [id], onDelete: Cascade)
-}
-
-model Transaction {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  type        String
-  transaction_id String?
-  from_user_id Int?
-  to_user_id   Int?
-  amount      Float
-  description String
-  note        String?
-  balance_before Float?
-  balance_after  Float?
-  related_ad_id  Int?
-  status      String   @default("completed")
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  from_user User? @relation("TransactionFromUser", fields: [from_user_id], references: [id], onDelete: SetNull)
-  to_user   User? @relation("TransactionToUser", fields: [to_user_id], references: [id], onDelete: SetNull)
-  related_ad Ad?  @relation("AdTransactions", fields: [related_ad_id], references: [id], onDelete: SetNull)
-}
-
-model MlmWallet {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  user_id     Int      @unique
-  credit_balance Float @default(0)
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  user User @relation("MlmWalletUser", fields: [user_id], references: [id], onDelete: Cascade)
-}
-
-model MlmCredit {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  sender_id   Int
-  receiver_id Int
-  status      String   @default("pending")
-  payment_status String @default("pending")
-  payment_confirmed_by_receiver Boolean @default(false)
-  payment_confirmed_at DateTime?
-  admin_approved_by Int?
-  admin_approved_at DateTime?
-  admin_note  String?
-  expires_at  DateTime
-  activated_at DateTime?
-  transfer_expires_at DateTime?
-  quantity    Int      @default(5)
-  transferred_count Int @default(0)
-  reverted_count Int    @default(0)
-  source_credit_id Int?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  sender   User @relation("MlmCreditSender", fields: [sender_id], references: [id], onDelete: Cascade)
-  receiver User @relation("MlmCreditReceiver", fields: [receiver_id], references: [id], onDelete: Cascade)
-  source_credit MlmCredit? @relation("MlmCreditSource", fields: [source_credit_id], references: [id], onDelete: SetNull)
-  derived_credits MlmCredit[] @relation("MlmCreditSource")
-}
-
-model MlmTransfer {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  sender_id   Int
-  receiver_id Int
-  voucher_id  Int?
-  source_slot_id Int?
-  amount      Float
-  slot_count  Int      @default(5)
-  slot_amount Float
-  slots       Json?
-  required_voucher_count Int @default(5)
-  baseline_voucher_count Int @default(0)
-  current_voucher_count Int @default(0)
-  unlocked_slots Int @default(0)
-  timer_started_at DateTime
-  expires_at  DateTime
-  unlocked_at DateTime?
-  returned_at DateTime?
-  return_reason String?
-  status      String   @default("pending_unlock")
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  sender   User @relation("MlmTransferSender", fields: [sender_id], references: [id], onDelete: Cascade)
-  receiver User @relation("MlmTransferReceiver", fields: [receiver_id], references: [id], onDelete: Cascade)
-  voucher  Voucher? @relation("VoucherMlmTransfers", fields: [voucher_id], references: [id], onDelete: SetNull)
-  source_slot SpecialCredit? @relation("MlmTransferSourceSlot", fields: [source_slot_id], references: [id], onDelete: SetNull)
-  special_credits SpecialCredit[] @relation("SpecialCreditTransfer")
-}
-
-model SpecialCredit {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  owner_id    Int
-  voucher_id  Int?
-  slot_number Int
-  credit_amount Float
-  status      String   @default("available")
-  recipient_id Int?
-  recipient_name String?
-  recipient_phone String?
-  sent_at     DateTime?
-  expires_at  DateTime?
-  is_locked   Boolean @default(false)
-  lock_reason String?
-  lock_expires_at DateTime?
-  unlocked_at DateTime?
-  transfer_id Int?
-  source_slot_id Int?
-  level       Int      @default(0)
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  owner User @relation("SpecialCreditOwner", fields: [owner_id], references: [id], onDelete: Cascade)
-  voucher Voucher? @relation("VoucherSpecialCredits", fields: [voucher_id], references: [id], onDelete: SetNull)
-  transfer MlmTransfer? @relation("SpecialCreditTransfer", fields: [transfer_id], references: [id], onDelete: SetNull)
-  source_slot SpecialCredit? @relation("SpecialCreditSource", fields: [source_slot_id], references: [id], onDelete: SetNull)
-  derived_slots SpecialCredit[] @relation("SpecialCreditSource")
-  source_slot_transfers MlmTransfer[] @relation("MlmTransferSourceSlot")
-}
-
-model NetworkEvent {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  user_id     Int?
-  event_type  String
-  payload     Json?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  user User? @relation("NetworkEventUser", fields: [user_id], references: [id], onDelete: SetNull)
-}
-
-model NetworkRules {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  rules       Json?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-}
-
-model SlotEvent {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  user_id     Int?
-  event_type  String
-  payload     Json?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  user User? @relation("SlotEventUser", fields: [user_id], references: [id], onDelete: SetNull)
-}
-
-model TempMessage {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  payload     Json?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-}
-
-model Designer {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  username    String   @unique
-  password    String
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  uploads DesignerUpload[]
-  requests DesignRequest[]
-}
-
-model DesignRequest {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  business_name String?
-  email       String?
-  web_links   String[] @default([])
-  phone_number String?
-  ad_text     String?
-  business_address String?
-  ad_type     String
-  channel_type String @default("withoutChannel")
-  reference_images_gridfs String[] @default([])
-  reference_videos_gridfs String[] @default([])
-  reference_images_s3 Json?
-  reference_videos_s3 Json?
-  uploader_phone String
-  uploader_name String?
-  user_legacy_id String?
-  status     String @default("pending")
-  admin_notes String?
-  assigned_designer_id Int?
-  assigned_designer_name String?
-  assigned_at DateTime?
-  completed_ad_id Int?
-  payment_status String @default("pending")
-  payment_order_id Int?
-  paid_at    DateTime?
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  assigned_designer Designer? @relation(fields: [assigned_designer_id], references: [id], onDelete: SetNull)
-  completed_ad Ad? @relation("DesignRequestCompletedAd", fields: [completed_ad_id], references: [id], onDelete: SetNull)
-  payment_orders AdPaymentOrder[] @relation("DesignRequestPaymentOrders")
-  uploads DesignerUpload[]
-}
-
-model DesignerUpload {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  design_request_id Int
-  designer_id Int
-  designer_name String
-  files_s3    Json?
-  notes       String?
-  status      String  @default("uploaded")
-  admin_notes String?
-  user_feedback String?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  design_request DesignRequest @relation(fields: [design_request_id], references: [id], onDelete: Cascade)
-  designer Designer @relation(fields: [designer_id], references: [id], onDelete: Cascade)
-}
-
-model VoucherRedemption {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  voucher_id  Int
-  used_at     DateTime @default(now())
-  used_by_id  Int?
-
-  voucher Voucher @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
-  used_by User? @relation("VoucherRedemptionUser", fields: [used_by_id], references: [id], onDelete: SetNull)
-}
-
-model VoucherTransferLog {
-  id          Int      @id @default(autoincrement())
-  legacy_id   String?  @unique
-  voucher_id  Int
-  from_user_id Int?
-  to_user_id   Int?
-  transferred_at DateTime @default(now())
-
-  voucher Voucher @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
-  from_user User? @relation("VoucherTransferLogFrom", fields: [from_user_id], references: [id], onDelete: SetNull)
-  to_user   User? @relation("VoucherTransferLogTo", fields: [to_user_id], references: [id], onDelete: SetNull)
-}
-
-// Ad Campaigns (new system — targeting, budgets, A/B variants)
-model AdCampaign {
-  id                Int       @id @default(autoincrement())
-  user_id           Int
-  business_card_id  Int?
-  phone             String?   // ← NEW: Direct phone number for direct calling
-  title             String
-  description       String?
-  ad_type           String    @default("banner")
-  cta               String?
-  creative_url      String?
-  creative_urls     String[]  @default([])
-  target_city       String?
-  target_age        String?
-  target_interests  String?
-  daily_budget      Float     @default(100)
-  duration_days     Int       @default(7)
-  total_budget      Float?
-  impressions       Int       @default(0)
-  clicks            Int       @default(0)
-  spent             Float     @default(0)
-  status            String    @default("active")
-  approval_status   String    @default("pending")
-  start_date        DateTime  @default(now())
-  end_date          DateTime?
-  created_at        DateTime  @default(now())
-  updated_at        DateTime  @updatedAt
-
-  user     User          @relation("UserAdCampaigns", fields: [user_id], references: [id], onDelete: Cascade)
-  business BusinessCard? @relation("BusinessCardAdCampaigns", fields: [business_card_id], references: [id], onDelete: SetNull)
-  variants AdVariant[]
-
-  @@map("ad_campaigns")
-}
-
-model AdVariant {
-  id           Int      @id @default(autoincrement())
-  campaign_id  Int
-  creative_url String
-  label        String
-  impressions  Int      @default(0)
-  clicks       Int      @default(0)
-  created_at   DateTime @default(now())
-
-  campaign AdCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
-
-  @@map("ad_variants")
 }
