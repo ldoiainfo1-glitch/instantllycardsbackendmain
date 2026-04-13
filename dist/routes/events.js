@@ -18,6 +18,8 @@ router.post('/', auth_1.authenticate, (0, auth_1.requireRole)('business', 'admin
     (0, express_validator_1.body)('time').notEmpty(),
 ], validate_1.validate, eventController_1.createEvent);
 router.put('/:id', auth_1.authenticate, eventController_1.updateEvent);
+router.post('/:id/payment-intent', auth_1.authenticate, eventController_1.createEventPaymentIntent);
 router.post('/:id/register', auth_1.authenticate, eventController_1.registerForEvent);
+router.post('/verify', auth_1.authenticate, eventController_1.verifyRegistration);
 exports.default = router;
 //# sourceMappingURL=events.js.map
