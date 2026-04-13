@@ -8,9 +8,11 @@ import {
   listMyEvents,
   createEvent,
   updateEvent,
+  createEventPaymentIntent,
   registerForEvent,
   getEventRegistrations,
   getMyRegistrations,
+  verifyRegistration,
 } from '../controllers/eventController';
 
 const router = Router();
@@ -34,6 +36,8 @@ router.post(
   createEvent
 );
 router.put('/:id', authenticate, updateEvent);
+router.post('/:id/payment-intent', authenticate, createEventPaymentIntent);
 router.post('/:id/register', authenticate, registerForEvent);
+router.post('/verify', authenticate, verifyRegistration);
 
 export default router;
