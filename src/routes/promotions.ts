@@ -1,14 +1,22 @@
 import { Router } from 'express';
 import { authenticate, requireRole } from '../middleware/auth';
-import { listPromotions, getPromotion, createPromotion, updatePromotion, getMyPromotions, listPromotionsNearby } from '../controllers/promotionController';
+import {
+  listPromotions, getPromotion, createPromotion, updatePromotion,
+  getMyPromotions, listPromotionsNearby, listPricingPlans,
+  createPromotionPaymentIntent, verifyPromotionPayment, retryPromotionPayment,
+} from '../controllers/promotionController';
 
 const router = Router();
 
 router.get('/', listPromotions);
 router.get('/nearby', listPromotionsNearby);
-router.get('/my', authenticate, requireRole('business', 'admin'), getMyPromotions);
+router.get('/pricing-plans', listPricingPlans);
+router.get('/my', authenticate, getMyPromotions);
+router.post('/', authenticate, createPromotion);
 router.get('/:id', getPromotion);
-router.post('/', authenticate, requireRole('business', 'admin'), createPromotion);
-router.put('/:id', authenticate, requireRole('business', 'admin'), updatePromotion);
+router.put('/:id', authenticate, updatePromotion);
+router.post('/:id/payment-intent', authenticate, createPromotionPaymentIntent);
+router.post('/:id/verify-payment', authenticate, verifyPromotionPayment);
+router.post('/:id/retry-payment', authenticate, retryPromotionPayment);
 
 export default router;

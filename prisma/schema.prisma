@@ -118,6 +118,8 @@ model UserRole {
   user_id Int
   role    Role
   user    User @relation("UserRoles", fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, role])
 }
 
 model RefreshToken {
@@ -939,6 +941,8 @@ model BusinessPromotion {
   pan_number                 String?
   listing_type               String           @default("free")
   listing_intent             String           @default("free")
+  plan_type                  String           @default("free")
+  tier                       String           @default("free") // free | growth | boost | scale
   status                     String           @default("draft")
   current_step               String?
   progress                   Int              @default(0)
@@ -956,7 +960,6 @@ model BusinessPromotion {
   visibility_call_clicks     Int              @default(0)
   visibility_whatsapp_clicks Int              @default(0)
   media                      Json?
-  is_active                  Boolean          @default(false)
   expiry_date                DateTime?
   created_at                 DateTime         @default(now())
   updated_at                 DateTime         @updatedAt
@@ -969,7 +972,8 @@ model BusinessPromotion {
   @@index([business_card_id])
   @@index([listing_type])
   @@index([status])
-  @@index([is_active])
+  @@index([plan_type, status])
+  @@index([expiry_date])
   @@index([created_at])
   @@index([city])
   @@index([state])

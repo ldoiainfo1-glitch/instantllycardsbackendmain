@@ -33,6 +33,7 @@ router.post('/login', authRateLimit, [
         return true;
     }),
     (0, express_validator_1.body)('password').notEmpty().withMessage('Password required'),
+    (0, express_validator_1.body)('loginType').optional().isIn(['customer', 'business']).withMessage('loginType must be customer or business'),
 ], validate_1.validate, authController_1.login);
 router.post('/refresh', authRateLimit, authController_1.refresh);
 router.post('/logout', auth_1.authenticate, authController_1.logout);

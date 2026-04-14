@@ -159,8 +159,7 @@ export async function createCard(req: AuthRequest, res: Response): Promise<void>
       data: { ...data, user_id: req.user!.userId, approval_status: 'pending' } as any,
     });
 
-    // Business role is NOT auto-assigned here.
-    // It will be granted when admin approves the card.
+    // Business role is granted only via premium promotion payment (see promotionController).
 
     res.status(201).json(card);
   } catch (err) {
