@@ -3,6 +3,7 @@ import prisma from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { paramInt } from '../utils/params';
 import { jsonSafe } from '../utils/serialize';
+import { normalizePhone } from '../utils/phone';
 
 export async function getProfile(req: AuthRequest, res: Response): Promise<void> {
   const user = await prisma.user.findUnique({
@@ -91,6 +92,47 @@ export async function upsertUserLocation(req: AuthRequest, res: Response): Promi
   });
 
   res.json(jsonSafe(location));
+}
+
+export async function matchContacts(req: AuthRequest, res: Response): Promise<void> {
+  const { phones } = req.body;
+  if (!Array.isArray(phones) || phones.length === 0) {
+    res.status(400).json({ error: 'phones array required' });
+    return;
+  }
+
+  // Use the same normalizePhone used during registration so formats always match
+  const cleaned = [...new Set(
+    phones.slice(0, 500)
+      .map((p: any) => normalizePhone(String(p).trim()))
+      .filter(p => p.length >= 7)
+  )];
+
+  if (cleaned.length === 0) {
+    res.json([]);
+    return;
+  }
+
+  // Query all variants so we match regardless of how the number was stored
+  const variants: string[] = [];
+  for (const p of cleaned) {
+    variants.push(p);
+    variants.push(`+91${p}`);
+    variants.push(`91${p}`);
+    variants.push(`0${p}`);
+  }
+
+  console.log(`[matchContacts] querying ${cleaned.length} unique phones (${variants.length} variants)`);
+
+  const users = await prisma.user.findMany({
+    where: { phone: { in: variants } },
+    select: { id: true, name: true, phone: true, profile_picture: true },
+  });
+
+  console.log(`[matchContacts] found ${users.length} app users`);
+  users.forEach(u => console.log('  matched:', u.id, u.phone));
+
+  res.json(users);
 }
 
 export async function deleteMe(req: AuthRequest, res: Response): Promise<void> {
