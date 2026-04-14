@@ -16,6 +16,7 @@ import adminRoutes from './routes/admin';
 import uploadRoutes from './routes/uploads';
 import bookingRoutes from './routes/bookings';
 import eventRoutes from './routes/events';
+import systemRoutes from './routes/system';
 
 const app = express();
 const httpServer = createServer(app);
@@ -46,6 +47,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/events', eventRoutes);
+app.use('/api/system', systemRoutes);
 
 // Socket.IO
 io.on('connection', (socket) => {

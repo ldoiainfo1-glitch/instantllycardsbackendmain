@@ -20,6 +20,7 @@ const admin_1 = __importDefault(require("./routes/admin"));
 const uploads_1 = __importDefault(require("./routes/uploads"));
 const bookings_1 = __importDefault(require("./routes/bookings"));
 const events_1 = __importDefault(require("./routes/events"));
+const system_1 = __importDefault(require("./routes/system"));
 const app = (0, express_1.default)();
 const httpServer = (0, http_1.createServer)(app);
 // Socket.IO
@@ -45,6 +46,7 @@ app.use('/api/admin', admin_1.default);
 app.use('/api/uploads', uploads_1.default);
 app.use('/api/bookings', bookings_1.default);
 app.use('/api/events', events_1.default);
+app.use('/api/system', system_1.default);
 // Socket.IO
 io.on('connection', (socket) => {
     console.log('✅ User connected:', socket.id);

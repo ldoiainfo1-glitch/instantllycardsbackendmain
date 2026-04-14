@@ -24,6 +24,7 @@ const CARD_FIELDS = [
     'personal_country_code', 'company_country_code', 'company_photo', 'about_business',
     'is_default', 'company_website', 'message', 'services_offered',
     'is_live', 'latitude', 'longitude', 'service_mode', 'home_service',
+    'pincode', 'gst_number', 'pan_number',
 ];
 function pickCardFields(body) {
     const result = {};
