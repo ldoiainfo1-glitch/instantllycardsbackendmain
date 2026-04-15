@@ -97,7 +97,7 @@ export async function sendMessage(req: AuthRequest, res: Response) {
 export async function deleteMessage(req: AuthRequest, res: Response) {
   try {
     const userId = req.user!.userId;
-    const messageId = parseInt(req.params.messageId);
+    const messageId = parseInt(req.params.messageId as string);
 
     const message = await prisma.message.findUnique({ where: { id: messageId } });
     if (!message) return res.status(404).json({ error: 'Message not found' });
