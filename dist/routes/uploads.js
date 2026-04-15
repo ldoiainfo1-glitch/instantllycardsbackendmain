@@ -58,5 +58,23 @@ router.post('/ad-creative', auth_1.authenticate, upload.single('file'), async (r
         res.status(500).json({ error: 'Upload failed' });
     }
 });
+// ─── Chat / group image upload ────────────────────────────────────────────────
+router.post('/chat-image', auth_1.authenticate, upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            res.status(400).json({ error: 'No file provided' });
+            return;
+        }
+        const userId = req.user.userId;
+        const ext = req.file.originalname?.split('.').pop() || 'jpg';
+        const key = `chat-images/${userId}/${Date.now()}.${ext}`;
+        const url = await (0, s3_1.uploadToS3)(req.file.buffer, key, req.file.mimetype);
+        res.json({ url });
+    }
+    catch (err) {
+        console.error('[Upload] Chat image upload failed:', err.message);
+        res.status(500).json({ error: 'Upload failed' });
+    }
+});
 exports.default = router;
 //# sourceMappingURL=uploads.js.map

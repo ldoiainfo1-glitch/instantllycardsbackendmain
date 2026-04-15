@@ -172,8 +172,8 @@ async function refresh(req, res) {
         res.status(401).json({ error: 'Refresh token revoked or expired' });
         return;
     }
-    // Rotate: delete old, issue new
-    await prisma_1.default.refreshToken.delete({ where: { id: stored.id } });
+    // Rotate: delete old, issue new (deleteMany avoids race-condition P2025)
+    await prisma_1.default.refreshToken.deleteMany({ where: { id: stored.id } });
     const roles = await getUserRoles(payload.userId);
     const newAccess = (0, jwt_1.signAccessToken)({ userId: payload.userId, roles });
     const newRefresh = (0, jwt_1.signRefreshToken)({ userId: payload.userId, roles });

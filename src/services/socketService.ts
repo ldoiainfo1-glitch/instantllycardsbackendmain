@@ -67,7 +67,7 @@ export function initSocketService(io: Server) {
           if (!membership) return socket.emit('message:error', { error: 'Not a group member' });
 
           message = await prisma.message.create({
-            data: { sender_id: userId, group_id: groupId, content, message_type: messageType, local_message_id: localMessageId || null },
+            data: { sender_id: userId, group_id: groupId, content, message_type: messageType as any, local_message_id: localMessageId || null },
             include: { sender: { select: { id: true, name: true, phone: true, profile_picture: true } } },
           });
 
@@ -100,7 +100,7 @@ export function initSocketService(io: Server) {
           if (!chat) return socket.emit('message:error', { error: 'Chat not found' });
 
           message = await prisma.message.create({
-            data: { sender_id: userId, chat_id: chat.id, content, message_type: messageType, local_message_id: localMessageId || null },
+            data: { sender_id: userId, chat_id: chat.id, content, message_type: messageType as any, local_message_id: localMessageId || null },
             include: { sender: { select: { id: true, name: true, phone: true, profile_picture: true } } },
           });
 
