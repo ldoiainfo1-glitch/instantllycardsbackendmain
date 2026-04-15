@@ -6,7 +6,14 @@ interface AuthSocket extends Socket {
   userId?: number;
 }
 
+let _io: Server | null = null;
+
+export function getIO(): Server | null {
+  return _io;
+}
+
 export function initSocketService(io: Server) {
+  _io = io;
   // Auth middleware
   io.use((socket: AuthSocket, next) => {
     const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');

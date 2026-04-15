@@ -70,4 +70,27 @@ router.post(
   }
 );
 
+// ─── Chat / group image upload ────────────────────────────────────────────────
+router.post(
+  '/chat-image',
+  authenticate,
+  upload.single('file'),
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: 'No file provided' });
+        return;
+      }
+      const userId = req.user!.userId;
+      const ext = req.file.originalname?.split('.').pop() || 'jpg';
+      const key = `chat-images/${userId}/${Date.now()}.${ext}`;
+      const url = await uploadToS3(req.file.buffer, key, req.file.mimetype);
+      res.json({ url });
+    } catch (err: any) {
+      console.error('[Upload] Chat image upload failed:', err.message);
+      res.status(500).json({ error: 'Upload failed' });
+    }
+  }
+);
+
 export default router;

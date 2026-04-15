@@ -7,6 +7,10 @@ export async function sendMessage(req: AuthRequest, res: Response) {
   try {
     const userId = req.user!.userId;
     const { receiverId, groupId, content, messageType = 'text', localMessageId, metadata } = req.body;
+    const normalizedMessageType = messageType === 'card' ? 'text' : messageType;
+    const normalizedMetadata = messageType === 'card'
+      ? { ...(metadata || {}), isCard: true }
+      : (metadata || undefined);
 
     if (!content) return res.status(400).json({ error: 'content required' });
     if (!receiverId && !groupId) return res.status(400).json({ error: 'receiverId or groupId required' });
@@ -23,9 +27,9 @@ export async function sendMessage(req: AuthRequest, res: Response) {
           sender_id: userId,
           group_id: groupId,
           content,
-          message_type: messageType,
+          message_type: normalizedMessageType,
           local_message_id: localMessageId || null,
-          metadata: metadata || undefined,
+          metadata: normalizedMetadata,
         },
         include: { sender: { select: { id: true, name: true, phone: true, profile_picture: true } } },
       });
@@ -64,9 +68,9 @@ export async function sendMessage(req: AuthRequest, res: Response) {
         receiver_id: receiverId,
         chat_id: chat.id,
         content,
-        message_type: messageType,
+        message_type: normalizedMessageType,
         local_message_id: localMessageId || null,
-        metadata: metadata || undefined,
+        metadata: normalizedMetadata,
         is_pending_delivery: true,
       },
       include: { sender: { select: { id: true, name: true, phone: true, profile_picture: true } } },
@@ -111,6 +115,7 @@ export async function deleteMessage(req: AuthRequest, res: Response) {
 }
 
 function formatMsg(msg: any) {
+  const derivedMessageType = msg?.metadata?.isCard ? 'card' : msg.message_type;
   return {
     id: msg.id,
     senderId: msg.sender_id,
@@ -118,7 +123,7 @@ function formatMsg(msg: any) {
     chatId: msg.chat_id,
     groupId: msg.group_id,
     content: msg.content,
-    messageType: msg.message_type,
+    messageType: derivedMessageType,
     isRead: msg.is_read,
     isDelivered: msg.is_delivered,
     localMessageId: msg.local_message_id,

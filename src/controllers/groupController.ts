@@ -2,6 +2,9 @@ import { Response } from 'express';
 import crypto from 'crypto';
 import prisma from '../prismaClient';
 import { AuthRequest } from '../middleware/auth';
+import { getIO } from '../services/socketService';
+
+
 
 /** GET /api/groups — list user's groups */
 export async function getGroups(req: AuthRequest, res: Response) {
@@ -62,7 +65,7 @@ export async function createGroup(req: AuthRequest, res: Response) {
     const { name, description, icon, memberIds = [] } = req.body;
     if (!name) return res.status(400).json({ error: 'Group name required' });
 
-    const joinCode = crypto.randomBytes(3).toString('hex').toUpperCase();
+    const joinCode = String(Math.floor(1000 + Math.random() * 9000));
 
     const group = await prisma.group.create({
       data: {
@@ -116,13 +119,13 @@ export async function joinGroup(req: AuthRequest, res: Response) {
     const existing = await prisma.groupMember.findUnique({
       where: { group_id_user_id: { group_id: group.id, user_id: userId } },
     });
-    if (existing) return res.json({ id: group.id, name: group.name, alreadyMember: true });
+    if (existing) return res.json({ id: group.id, name: group.name, adminId: group.admin_id, alreadyMember: true });
 
     await prisma.groupMember.create({
       data: { group_id: group.id, user_id: userId, role: 'member' },
     });
 
-    res.json({ id: group.id, name: group.name, alreadyMember: false });
+    res.json({ id: group.id, name: group.name, adminId: group.admin_id, alreadyMember: false });
   } catch (err: any) {
     console.error('joinGroup error:', err);
     res.status(500).json({ error: 'Failed to join group' });
@@ -158,6 +161,7 @@ export async function getGroupDetail(req: AuthRequest, res: Response) {
       description: group.description,
       icon: group.icon,
       joinCode: group.join_code,
+      isSharing: group.is_sharing,
       admin: { id: group.admin.id, name: group.admin.name, phone: group.admin.phone, avatar: group.admin.profile_picture },
       members: group.members.map((m) => ({
         id: m.user.id,
@@ -197,18 +201,30 @@ export async function getGroupMessages(req: AuthRequest, res: Response) {
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
 
-    const formatted = messages.reverse().map((msg) => ({
-      id: msg.id,
-      senderId: msg.sender_id,
-      groupId: msg.group_id,
-      content: msg.content,
-      messageType: msg.message_type,
-      isRead: msg.is_read,
-      localMessageId: msg.local_message_id,
-      metadata: msg.metadata,
-      createdAt: msg.created_at,
-      sender: { id: msg.sender.id, name: msg.sender.name, phone: msg.sender.phone, avatar: msg.sender.profile_picture },
-    }));
+    const formatted = messages.reverse().map((msg) => {
+      const isCard = !!msg.metadata?.isCard || (() => {
+        if (msg.message_type !== 'text') return false;
+        try {
+          const parsed = JSON.parse(msg.content || '{}');
+          return !!(parsed && (parsed.full_name || parsed.company_name || parsed.logo_url));
+        } catch {
+          return false;
+        }
+      })();
+
+      return {
+        id: msg.id,
+        senderId: msg.sender_id,
+        groupId: msg.group_id,
+        content: msg.content,
+        messageType: isCard ? 'card' : msg.message_type,
+        isRead: msg.is_read,
+        localMessageId: msg.local_message_id,
+        metadata: msg.metadata,
+        createdAt: msg.created_at,
+        sender: { id: msg.sender.id, name: msg.sender.name, phone: msg.sender.phone, avatar: msg.sender.profile_picture },
+      };
+    });
 
     const nextCursor = messages.length === limit ? messages[0].id : null;
     res.json({ messages: formatted, nextCursor });
@@ -266,6 +282,146 @@ export async function removeMember(req: AuthRequest, res: Response) {
     res.json({ ok: true });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to remove member' });
+  }
+}
+
+/** POST /api/groups/:groupId/start-sharing — admin starts card sharing session */
+export async function startSharing(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.user!.userId;
+    const groupId = parseInt(req.params.groupId);
+
+    const group = await prisma.group.findUnique({ where: { id: groupId } });
+    if (!group) return res.status(404).json({ error: 'Group not found' });
+    if (group.admin_id !== userId) return res.status(403).json({ error: 'Only admin can start sharing' });
+
+    // Persist sharing state in DB
+    await prisma.group.update({ where: { id: groupId }, data: { is_sharing: true } });
+
+    // Emit socket event to all group members
+    const io = getIO();
+    if (io) {
+      const members = await prisma.groupMember.findMany({ where: { group_id: groupId }, select: { user_id: true } });
+      members.forEach((m) => {
+        io.to(`user:${m.user_id}`).emit('group:sharing_started', { groupId, joinCode: group.join_code });
+      });
+    }
+
+    res.json({ ok: true, groupId });
+  } catch (err: any) {
+    console.error('startSharing error:', err);
+    res.status(500).json({ error: 'Failed to start sharing' });
+  }
+}
+
+/** POST /api/groups/:groupId/stop-sharing — admin ends card sharing session */
+export async function stopSharing(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.user!.userId;
+    const groupId = parseInt(req.params.groupId);
+
+    const group = await prisma.group.findUnique({ where: { id: groupId } });
+    if (!group) return res.status(404).json({ error: 'Group not found' });
+    if (group.admin_id !== userId) return res.status(403).json({ error: 'Only admin can stop sharing' });
+
+    await prisma.group.update({ where: { id: groupId }, data: { is_sharing: false } });
+
+    // Keep only participants who actually shared at least one card;
+    // this prevents join-by-code members from persisting when they never shared.
+    const nonAdminMembers = await prisma.groupMember.findMany({
+      where: { group_id: groupId, user_id: { not: group.admin_id } },
+      select: { user_id: true },
+    });
+    if (nonAdminMembers.length > 0) {
+      const memberIds = nonAdminMembers.map((m) => m.user_id);
+      const memberMessages = await prisma.message.findMany({
+        where: {
+          group_id: groupId,
+          sender_id: { in: memberIds },
+          is_deleted: false,
+        },
+        select: { sender_id: true, message_type: true, content: true, metadata: true },
+      });
+
+      const sharedIds = new Set<number>();
+      for (const msg of memberMessages) {
+        if (msg.metadata && (msg.metadata as any).isCard) {
+          sharedIds.add(msg.sender_id);
+          continue;
+        }
+        if (msg.message_type !== 'text') continue;
+        try {
+          const parsed = JSON.parse(msg.content || '{}');
+          if (parsed && (parsed.full_name || parsed.company_name || parsed.logo_url)) {
+            sharedIds.add(msg.sender_id);
+          }
+        } catch {
+          // ignore non-JSON text messages
+        }
+      }
+
+      const toRemove = memberIds.filter((id) => !sharedIds.has(id));
+      if (toRemove.length > 0) {
+        await prisma.groupMember.deleteMany({
+          where: { group_id: groupId, user_id: { in: toRemove } },
+        });
+      }
+    }
+
+    res.json({ ok: true, groupId });
+  } catch (err: any) {
+    console.error('stopSharing error:', err);
+    res.status(500).json({ error: 'Failed to stop sharing' });
+  }
+}
+
+/** GET /api/groups/:groupId/media — all image + card messages for media tab */
+export async function getGroupMedia(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.user!.userId;
+    const groupId = parseInt(req.params.groupId);
+
+    const membership = await prisma.groupMember.findUnique({
+      where: { group_id_user_id: { group_id: groupId, user_id: userId } },
+    });
+    if (!membership) return res.status(403).json({ error: 'Not a member' });
+
+    const messages = await prisma.message.findMany({
+      where: {
+        group_id: groupId,
+        is_deleted: false,
+      },
+      include: { sender: { select: { id: true, name: true } } },
+      orderBy: { created_at: 'desc' },
+      take: 200,
+    });
+
+    const media = messages
+      .filter((msg) => {
+        if (msg.message_type === 'image') return true;
+        if (msg.metadata && (msg.metadata as any).isCard) return true;
+        if (msg.message_type !== 'text') return false;
+        try {
+          const parsed = JSON.parse(msg.content || '{}');
+          return !!(parsed && (parsed.full_name || parsed.company_name || parsed.logo_url));
+        } catch {
+          return false;
+        }
+      })
+      .map((msg) => ({
+      id: msg.id,
+      messageType: msg.message_type === 'image' ? 'image' : 'card',
+      content: msg.content,      // image URL or card JSON
+      metadata: msg.metadata,
+      senderId: msg.sender_id,
+      senderName: msg.sender.name,
+      createdAt: msg.created_at,
+    }));
+
+    res.json({ media });
+  } catch (err: any) {
+    console.error('getGroupMedia error:', err);
+    res.status(500).json({ error: 'Failed to fetch media' });
   }
 }
 

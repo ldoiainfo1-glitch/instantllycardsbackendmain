@@ -16,12 +16,11 @@ export async function listPromotions(req: Request, res: Response): Promise<void>
   const listingType = typeof req.query.listing_type === 'string' ? req.query.listing_type.trim() : '';
   const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
 
-  // Default: show active free + active non-expired premium + pending_payment (as free fallback)
+  // Backward-compatible default: active + non-expired + pending payment
   const now = new Date();
   const where: any = {
     OR: [
-      { plan_type: 'free', status: 'active' },
-      { plan_type: 'premium', status: 'active', expiry_date: { gt: now } },
+      { status: 'active', OR: [{ expiry_date: null }, { expiry_date: { gt: now } }] },
       { status: 'pending_payment' },
     ],
   };
@@ -43,7 +42,7 @@ export async function listPromotions(req: Request, res: Response): Promise<void>
   const promotions = await prisma.businessPromotion.findMany({
     skip: (page - 1) * limit,
     take: limit,
-    orderBy: [{ visibility_priority_score: 'desc' }, { created_at: 'desc' }],
+    orderBy: [{ created_at: 'desc' }],
     where,
     select: {
       id: true,
@@ -70,11 +69,8 @@ export async function listPromotions(req: Request, res: Response): Promise<void>
       created_at: true,
       updated_at: true,
       plan_name: true,
-      plan_type: true,
-      tier: true,
       status: true,
       expiry_date: true,
-      visibility_priority_score: true,
       business_card: {
         select: {
           id: true,
@@ -111,8 +107,8 @@ export async function listPromotions(req: Request, res: Response): Promise<void>
   });
   const data = promotions.map((p: any) => ({
     ...p,
-    effectiveTier: effectiveTier(p.tier, p.status),
-    is_premium: p.tier !== 'free' && p.status === 'active',
+    effectiveTier: effectiveTier(p.tier ?? 'free', p.status),
+    is_premium: (p.tier ?? 'free') !== 'free' && p.status === 'active',
   }));
   res.json({ data, page, limit });
 }
@@ -146,17 +142,14 @@ export async function getPromotion(req: Request, res: Response): Promise<void> {
       created_at: true,
       updated_at: true,
       plan_name: true,
-      plan_type: true,
-      tier: true,
       status: true,
       expiry_date: true,
-      visibility_priority_score: true,
       business_card: true,
       user: { select: { id: true, name: true } },
     },
   });
   if (!promo) { res.status(404).json({ error: 'Not found' }); return; }
-  res.json({ ...promo, effectiveTier: effectiveTier((promo as any).tier, (promo as any).status) });
+  res.json({ ...promo, effectiveTier: effectiveTier((promo as any).tier ?? 'free', (promo as any).status) });
 }
 
 export async function createPromotion(req: AuthRequest, res: Response): Promise<void> {
@@ -269,11 +262,39 @@ export async function updatePromotion(req: AuthRequest, res: Response): Promise<
 export async function getMyPromotions(req: AuthRequest, res: Response): Promise<void> {
   const promotions = await prisma.businessPromotion.findMany({
     where: { user_id: req.user!.userId },
+    select: {
+      id: true,
+      business_card_id: true,
+      business_name: true,
+      owner_name: true,
+      description: true,
+      category: true,
+      email: true,
+      phone: true,
+      whatsapp: true,
+      website: true,
+      business_hours: true,
+      area: true,
+      pincode: true,
+      plot_no: true,
+      building_name: true,
+      street_name: true,
+      landmark: true,
+      city: true,
+      state: true,
+      listing_type: true,
+      listing_intent: true,
+      created_at: true,
+      updated_at: true,
+      plan_name: true,
+      status: true,
+      expiry_date: true,
+    },
     orderBy: { created_at: 'desc' },
   });
   res.json(promotions.map((p: any) => ({
     ...p,
-    effectiveTier: effectiveTier(p.tier, p.status),
+    effectiveTier: effectiveTier(p.tier ?? 'free', p.status),
   })));
 }
 
