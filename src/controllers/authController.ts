@@ -186,8 +186,8 @@ export async function refresh(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // Rotate: delete old, issue new
-  await prisma.refreshToken.delete({ where: { id: stored.id } });
+  // Rotate: delete old, issue new (deleteMany avoids race-condition P2025)
+  await prisma.refreshToken.deleteMany({ where: { id: stored.id } });
 
   const roles = await getUserRoles(payload.userId);
   const newAccess = signAccessToken({ userId: payload.userId, roles });

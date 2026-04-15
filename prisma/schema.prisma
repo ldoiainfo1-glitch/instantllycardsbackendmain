@@ -780,6 +780,7 @@ model Group {
   last_message_id   Int?              @unique
   last_message_time DateTime          @default(now())
   is_active         Boolean           @default(true)
+  is_sharing        Boolean           @default(false)
   created_at        DateTime          @default(now())
   updated_at        DateTime          @updatedAt
   chats             Chat[]            @relation("GroupChats")
