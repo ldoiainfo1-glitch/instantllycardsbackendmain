@@ -63,7 +63,7 @@ export async function getConversations(req: AuthRequest, res: Response) {
 export async function getChatMessages(req: AuthRequest, res: Response) {
   try {
     const userId = req.user!.userId;
-    const chatId = parseInt(req.params.chatId);
+    const chatId = parseInt(req.params.chatId as string);
     const cursor = req.query.cursor ? parseInt(String(req.query.cursor)) : undefined;
     const limit = Math.min(parseInt(String(req.query.limit)) || 50, 100);
 
@@ -171,7 +171,7 @@ export async function findOrCreateChat(req: AuthRequest, res: Response) {
 export async function toggleMute(req: AuthRequest, res: Response) {
   try {
     const userId = req.user!.userId;
-    const chatId = parseInt(req.params.chatId);
+    const chatId = parseInt(req.params.chatId as string);
     const { muted } = req.body;
 
     await prisma.chatParticipant.update({

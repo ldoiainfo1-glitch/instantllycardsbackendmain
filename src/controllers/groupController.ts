@@ -136,7 +136,7 @@ export async function joinGroup(req: AuthRequest, res: Response) {
 export async function getGroupDetail(req: AuthRequest, res: Response) {
   try {
     const userId = req.user!.userId;
-    const groupId = parseInt(req.params.groupId);
+    const groupId = parseInt(req.params.groupId as string);
 
     const membership = await prisma.groupMember.findUnique({
       where: { group_id_user_id: { group_id: groupId, user_id: userId } },
@@ -161,7 +161,7 @@ export async function getGroupDetail(req: AuthRequest, res: Response) {
       description: group.description,
       icon: group.icon,
       joinCode: group.join_code,
-      isSharing: group.is_sharing,
+      isSharing: (group as any).is_sharing,
       admin: { id: group.admin.id, name: group.admin.name, phone: group.admin.phone, avatar: group.admin.profile_picture },
       members: group.members.map((m) => ({
         id: m.user.id,
@@ -184,7 +184,7 @@ export async function getGroupDetail(req: AuthRequest, res: Response) {
 export async function getGroupMessages(req: AuthRequest, res: Response) {
   try {
     const userId = req.user!.userId;
-    const groupId = parseInt(req.params.groupId);
+    const groupId = parseInt(req.params.groupId as string);
     const cursor = req.query.cursor ? parseInt(String(req.query.cursor)) : undefined;
     const limit = Math.min(parseInt(String(req.query.limit)) || 50, 100);
 
@@ -202,7 +202,7 @@ export async function getGroupMessages(req: AuthRequest, res: Response) {
     });
 
     const formatted = messages.reverse().map((msg) => {
-      const isCard = !!msg.metadata?.isCard || (() => {
+      const isCard = !!(msg.metadata as any)?.isCard || (() => {
         if (msg.message_type !== 'text') return false;
         try {
           const parsed = JSON.parse(msg.content || '{}');
@@ -238,7 +238,7 @@ export async function getGroupMessages(req: AuthRequest, res: Response) {
 export async function updateGroup(req: AuthRequest, res: Response) {
   try {
     const userId = req.user!.userId;
-    const groupId = parseInt(req.params.groupId);
+    const groupId = parseInt(req.params.groupId as string);
 
     const group = await prisma.group.findUnique({ where: { id: groupId } });
     if (!group) return res.status(404).json({ error: 'Group not found' });
@@ -264,8 +264,8 @@ export async function updateGroup(req: AuthRequest, res: Response) {
 export async function removeMember(req: AuthRequest, res: Response) {
   try {
     const userId = req.user!.userId;
-    const groupId = parseInt(req.params.groupId);
-    const memberId = parseInt(req.params.memberId);
+    const groupId = parseInt(req.params.groupId as string);
+    const memberId = parseInt(req.params.memberId as string);
 
     const group = await prisma.group.findUnique({ where: { id: groupId } });
     if (!group) return res.status(404).json({ error: 'Group not found' });
@@ -289,14 +289,14 @@ export async function removeMember(req: AuthRequest, res: Response) {
 export async function startSharing(req: AuthRequest, res: Response) {
   try {
     const userId = req.user!.userId;
-    const groupId = parseInt(req.params.groupId);
+    const groupId = parseInt(req.params.groupId as string);
 
     const group = await prisma.group.findUnique({ where: { id: groupId } });
     if (!group) return res.status(404).json({ error: 'Group not found' });
     if (group.admin_id !== userId) return res.status(403).json({ error: 'Only admin can start sharing' });
 
     // Persist sharing state in DB
-    await prisma.group.update({ where: { id: groupId }, data: { is_sharing: true } });
+    await prisma.group.update({ where: { id: groupId }, data: { is_sharing: true } as any });
 
     // Emit socket event to all group members
     const io = getIO();
@@ -318,13 +318,13 @@ export async function startSharing(req: AuthRequest, res: Response) {
 export async function stopSharing(req: AuthRequest, res: Response) {
   try {
     const userId = req.user!.userId;
-    const groupId = parseInt(req.params.groupId);
+    const groupId = parseInt(req.params.groupId as string);
 
     const group = await prisma.group.findUnique({ where: { id: groupId } });
     if (!group) return res.status(404).json({ error: 'Group not found' });
     if (group.admin_id !== userId) return res.status(403).json({ error: 'Only admin can stop sharing' });
 
-    await prisma.group.update({ where: { id: groupId }, data: { is_sharing: false } });
+    await prisma.group.update({ where: { id: groupId }, data: { is_sharing: false } as any });
 
     // Keep only participants who actually shared at least one card;
     // this prevents join-by-code members from persisting when they never shared.
@@ -379,7 +379,7 @@ export async function stopSharing(req: AuthRequest, res: Response) {
 export async function getGroupMedia(req: AuthRequest, res: Response) {
   try {
     const userId = req.user!.userId;
-    const groupId = parseInt(req.params.groupId);
+    const groupId = parseInt(req.params.groupId as string);
 
     const membership = await prisma.groupMember.findUnique({
       where: { group_id_user_id: { group_id: groupId, user_id: userId } },
@@ -429,7 +429,7 @@ export async function getGroupMedia(req: AuthRequest, res: Response) {
 export async function addMembers(req: AuthRequest, res: Response) {
   try {
     const userId = req.user!.userId;
-    const groupId = parseInt(req.params.groupId);
+    const groupId = parseInt(req.params.groupId as string);
     const { memberIds } = req.body;
 
     const group = await prisma.group.findUnique({ where: { id: groupId } });
