@@ -207,6 +207,10 @@ async function getMyAds(req, res) {
 // ─── Get my campaigns (new system only) ───────────────────────────────────
 async function getMyCampaigns(req, res) {
     try {
+        const promotionId = req.query.promotionId
+            ? parseInt(req.query.promotionId, 10)
+            : null;
+        console.log(`[getMyCampaigns] userId=${req.user.userId} promotionId=${promotionId}`);
         // Auto-pause expired ads
         await prisma_1.default.adCampaign.updateMany({
             where: {
@@ -216,8 +220,27 @@ async function getMyCampaigns(req, res) {
             },
             data: { status: 'completed' }
         });
+        // Build where clause: always scope to user, and optionally scope to promotion's card
+        const whereClause = { user_id: req.user.userId };
+        if (promotionId) {
+            // Look up the promotion's business_card_id to scope campaigns
+            const promo = await prisma_1.default.businessPromotion.findFirst({
+                where: { id: promotionId, user_id: req.user.userId },
+                select: { business_card_id: true },
+            });
+            console.log(`[getMyCampaigns] promo lookup for promotionId=${promotionId}:`, JSON.stringify(promo));
+            if (promo?.business_card_id) {
+                whereClause.business_card_id = promo.business_card_id;
+            }
+            else {
+                // Promotion has no linked card — return empty
+                console.log(`[getMyCampaigns] no business_card_id for promotionId=${promotionId}, returning empty`);
+                res.json([]);
+                return;
+            }
+        }
         const campaigns = await prisma_1.default.adCampaign.findMany({
-            where: { user_id: req.user.userId },
+            where: whereClause,
             include: {
                 business: { select: { id: true, company_name: true, logo_url: true } },
                 variants: true,
@@ -450,6 +473,8 @@ async function trackClick(req, res) {
 // ─── Campaign analytics ─────────────────────────────────────────────────────
 async function getCampaignAnalytics(req, res) {
     try {
+        const _promotionId = req.query.promotionId || null;
+        console.log(`[getCampaignAnalytics] userId=${req.user.userId} campaignId=${req.params.id} promotionId=${_promotionId}`);
         const id = (0, params_1.paramInt)(req.params.id);
         const campaign = await prisma_1.default.adCampaign.findUnique({
             where: { id },

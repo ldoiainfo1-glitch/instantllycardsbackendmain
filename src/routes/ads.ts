@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
+import { requireFeature } from '../middleware/requireFeature';
 import { body } from 'express-validator';
 import {
   listAds,
@@ -23,16 +24,17 @@ const router = Router();
 // Public: list active campaigns for delivery
 router.get('/campaigns', listAds);
 
-// Authenticated: my campaigns
-router.get('/campaigns/my', authenticate, getMyCampaigns);
+// Authenticated: my campaigns (basic_ads or ads feature required)
+router.get('/campaigns/my', authenticate, requireFeature('basic_ads'), getMyCampaigns);
 
 // Authenticated: single campaign
 router.get('/campaigns/:id', authenticate, getCampaign);
 
-// Create campaign
+// Create campaign (requires 'ads' feature — boost+ tier)
 router.post(
   '/campaigns',
   authenticate,
+  requireFeature('ads'),
   [
     body('title').isString().notEmpty().withMessage('title is required'),
     body('ad_type').isString().notEmpty().withMessage('ad_type is required'),
@@ -48,12 +50,12 @@ router.put('/campaigns/:id', authenticate, updateCampaign);
 // Delete campaign
 router.delete('/campaigns/:id', authenticate, deleteCampaign);
 
-// Tracking
+// Tracking (public — no feature gate)
 router.post('/campaigns/:id/impression', trackImpression);
 router.post('/campaigns/:id/click', trackClick);
 
-// Analytics
-router.get('/campaigns/:id/analytics', authenticate, getCampaignAnalytics);
+// Analytics (requires 'analytics' feature — growth+ tier)
+router.get('/campaigns/:id/analytics', authenticate, requireFeature('analytics'), getCampaignAnalytics);
 
 // Variants
 router.get('/campaigns/:id/variants', authenticate, getCampaignVariants);

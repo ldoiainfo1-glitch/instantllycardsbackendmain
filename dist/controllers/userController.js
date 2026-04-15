@@ -8,10 +8,12 @@ exports.updateProfile = updateProfile;
 exports.getUserById = getUserById;
 exports.getUserLocation = getUserLocation;
 exports.upsertUserLocation = upsertUserLocation;
+exports.matchContacts = matchContacts;
 exports.deleteMe = deleteMe;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const params_1 = require("../utils/params");
 const serialize_1 = require("../utils/serialize");
+const phone_1 = require("../utils/phone");
 async function getProfile(req, res) {
     const user = await prisma_1.default.user.findUnique({
         where: { id: req.user.userId },
@@ -102,6 +104,37 @@ async function upsertUserLocation(req, res) {
         update: data,
     });
     res.json((0, serialize_1.jsonSafe)(location));
+}
+async function matchContacts(req, res) {
+    const { phones } = req.body;
+    if (!Array.isArray(phones) || phones.length === 0) {
+        res.status(400).json({ error: 'phones array required' });
+        return;
+    }
+    // Use the same normalizePhone used during registration so formats always match
+    const cleaned = [...new Set(phones.slice(0, 500)
+            .map((p) => (0, phone_1.normalizePhone)(String(p).trim()))
+            .filter(p => p.length >= 7))];
+    if (cleaned.length === 0) {
+        res.json([]);
+        return;
+    }
+    // Query all variants so we match regardless of how the number was stored
+    const variants = [];
+    for (const p of cleaned) {
+        variants.push(p);
+        variants.push(`+91${p}`);
+        variants.push(`91${p}`);
+        variants.push(`0${p}`);
+    }
+    console.log(`[matchContacts] querying ${cleaned.length} unique phones (${variants.length} variants)`);
+    const users = await prisma_1.default.user.findMany({
+        where: { phone: { in: variants } },
+        select: { id: true, name: true, phone: true, profile_picture: true },
+    });
+    console.log(`[matchContacts] found ${users.length} app users`);
+    users.forEach(u => console.log('  matched:', u.id, u.phone));
+    res.json(users);
 }
 async function deleteMe(req, res) {
     const userId = req.user.userId;

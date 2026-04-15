@@ -97,8 +97,8 @@ async function signup(req, res) {
     }
 }
 async function login(req, res) {
-    const { phone, email, password } = req.body;
-    log(`[LOGIN] Attempt — identifier: ${phone ?? email}`);
+    const { phone, email, password, loginType } = req.body;
+    log(`[LOGIN] Attempt — identifier: ${phone ?? email}, loginType: ${loginType ?? 'any'}`);
     try {
         const variants = phone ? (0, phone_1.phoneVariants)(phone) : [];
         log(`[LOGIN] Phone variants to try: [${variants.join(', ')}]`);
@@ -121,31 +121,14 @@ async function login(req, res) {
             res.status(401).json({ error: 'Invalid credentials' });
             return;
         }
-        let roles = await getUserRoles(user.id);
-        // Sync business role with card approval status (admin users are exempt)
-        const hasApprovedCard = await prisma_1.default.businessCard.findFirst({
-            where: { user_id: user.id, approval_status: 'approved' },
-        });
-        if (hasApprovedCard && !roles.includes('business')) {
-            await prisma_1.default.userRole.create({ data: { user_id: user.id, role: 'business' } });
-            log(`[LOGIN] Approved card found — granted business role for userId: ${user.id}`);
-            roles.push('business');
+        const roles = await getUserRoles(user.id);
+        // Validate loginType — if user requests business tab but doesn't have the role, reject
+        if (loginType === 'business' && !roles.includes('business')) {
+            warn(`[LOGIN] Rejected — userId: ${user.id} tried loginType=business but roles=[${roles.join(', ')}]`);
+            res.status(403).json({ error: 'You do not have a business account. Please promote your business first.' });
+            return;
         }
-        else if (!hasApprovedCard && roles.includes('business') && !roles.includes('admin')) {
-            await prisma_1.default.userRole.deleteMany({ where: { user_id: user.id, role: 'business' } });
-            log(`[LOGIN] No approved card — removed stale business role for userId: ${user.id}`);
-            roles = roles.filter(r => r !== 'business');
-        }
-        // Check latest card approval status for frontend messaging
-        let businessApprovalStatus = null;
-        const latestCard = await prisma_1.default.businessCard.findFirst({
-            where: { user_id: user.id },
-            orderBy: { created_at: 'desc' },
-            select: { approval_status: true },
-        });
-        if (latestCard)
-            businessApprovalStatus = latestCard.approval_status;
-        log(`[LOGIN] Success — userId: ${user.id}, roles: [${roles.join(', ')}]`);
+        log(`[LOGIN] Success — userId: ${user.id}, phone: ${user.phone}, rolesFromDB: [${roles.join(', ')}], roleCount: ${roles.length}`);
         const accessToken = (0, jwt_1.signAccessToken)({ userId: user.id, roles });
         const refreshToken = (0, jwt_1.signRefreshToken)({ userId: user.id, roles });
         await prisma_1.default.refreshToken.create({
@@ -155,12 +138,11 @@ async function login(req, res) {
                 expires_at: (0, jwt_1.refreshTokenExpiry)(),
             },
         });
-        log(`[LOGIN] Tokens issued — userId: ${user.id}`);
+        log(`[LOGIN] Tokens issued — userId: ${user.id}, rolesInToken: [${roles.join(', ')}]`);
         res.json({
             accessToken,
             refreshToken,
             user: { id: user.id, phone: user.phone, email: user.email, name: user.name, roles },
-            businessApprovalStatus,
         });
     }
     catch (err) {

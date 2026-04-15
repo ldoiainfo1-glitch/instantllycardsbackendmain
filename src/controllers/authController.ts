@@ -101,8 +101,8 @@ export async function signup(req: Request, res: Response): Promise<void> {
 }
 
 export async function login(req: Request, res: Response): Promise<void> {
-  const { phone, email, password } = req.body;
-  log(`[LOGIN] Attempt — identifier: ${phone ?? email}`);
+  const { phone, email, password, loginType } = req.body;
+  log(`[LOGIN] Attempt — identifier: ${phone ?? email}, loginType: ${loginType ?? 'any'}`);
 
   try {
     const variants = phone ? phoneVariants(phone) : [];
@@ -129,32 +129,16 @@ export async function login(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    let roles = await getUserRoles(user.id);
+    const roles = await getUserRoles(user.id);
 
-    // Sync business role with card approval status (admin users are exempt)
-    const hasApprovedCard = await prisma.businessCard.findFirst({
-      where: { user_id: user.id, approval_status: 'approved' },
-    });
-    if (hasApprovedCard && !roles.includes('business')) {
-      await prisma.userRole.create({ data: { user_id: user.id, role: 'business' } });
-      log(`[LOGIN] Approved card found — granted business role for userId: ${user.id}`);
-      roles.push('business');
-    } else if (!hasApprovedCard && roles.includes('business') && !roles.includes('admin')) {
-      await prisma.userRole.deleteMany({ where: { user_id: user.id, role: 'business' } });
-      log(`[LOGIN] No approved card — removed stale business role for userId: ${user.id}`);
-      roles = roles.filter(r => r !== 'business');
+    // Validate loginType — if user requests business tab but doesn't have the role, reject
+    if (loginType === 'business' && !roles.includes('business')) {
+      warn(`[LOGIN] Rejected — userId: ${user.id} tried loginType=business but roles=[${roles.join(', ')}]`);
+      res.status(403).json({ error: 'You do not have a business account. Please promote your business first.' });
+      return;
     }
 
-    // Check latest card approval status for frontend messaging
-    let businessApprovalStatus: string | null = null;
-    const latestCard = await prisma.businessCard.findFirst({
-      where: { user_id: user.id },
-      orderBy: { created_at: 'desc' },
-      select: { approval_status: true },
-    });
-    if (latestCard) businessApprovalStatus = latestCard.approval_status;
-
-    log(`[LOGIN] Success — userId: ${user.id}, roles: [${roles.join(', ')}]`);
+    log(`[LOGIN] Success — userId: ${user.id}, phone: ${user.phone}, rolesFromDB: [${roles.join(', ')}], roleCount: ${roles.length}`);
 
     const accessToken = signAccessToken({ userId: user.id, roles });
     const refreshToken = signRefreshToken({ userId: user.id, roles });
@@ -165,13 +149,12 @@ export async function login(req: Request, res: Response): Promise<void> {
         expires_at: refreshTokenExpiry(),
       },
     });
-    log(`[LOGIN] Tokens issued — userId: ${user.id}`);
+    log(`[LOGIN] Tokens issued — userId: ${user.id}, rolesInToken: [${roles.join(', ')}]`);
 
     res.json({
       accessToken,
       refreshToken,
       user: { id: user.id, phone: user.phone, email: user.email, name: user.name, roles },
-      businessApprovalStatus,
     });
   } catch (err: any) {
     console.error('[LOGIN] Failed', err);
@@ -203,8 +186,8 @@ export async function refresh(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // Rotate: delete old, issue new
-  await prisma.refreshToken.delete({ where: { id: stored.id } });
+  // Rotate: delete old, issue new (deleteMany avoids race-condition P2025)
+  await prisma.refreshToken.deleteMany({ where: { id: stored.id } });
 
   const roles = await getUserRoles(payload.userId);
   const newAccess = signAccessToken({ userId: payload.userId, roles });

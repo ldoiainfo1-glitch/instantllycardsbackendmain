@@ -5,4 +5,5 @@ export declare function updateProfile(req: AuthRequest, res: Response): Promise<
 export declare function getUserById(req: AuthRequest, res: Response): Promise<void>;
 export declare function getUserLocation(req: AuthRequest, res: Response): Promise<void>;
 export declare function upsertUserLocation(req: AuthRequest, res: Response): Promise<void>;
+export declare function matchContacts(req: AuthRequest, res: Response): Promise<void>;
 export declare function deleteMe(req: AuthRequest, res: Response): Promise<void>;

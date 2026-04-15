@@ -51,6 +51,7 @@ router.post(
       return true;
     }),
     body('password').notEmpty().withMessage('Password required'),
+    body('loginType').optional().isIn(['customer', 'business']).withMessage('loginType must be customer or business'),
   ],
   validate,
   login
