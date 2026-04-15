@@ -18,6 +18,10 @@ import bookingRoutes from './routes/bookings';
 import eventRoutes from './routes/events';
 import systemRoutes from './routes/system';
 import { startScheduledJobs } from './jobs/scheduler';
+import chatRoutes from './routes/chats';
+import groupRoutes from './routes/groups';
+import messageRoutes from './routes/messages';
+import { initSocketService } from './services/socketService';
 
 const app = express();
 const httpServer = createServer(app);
@@ -49,23 +53,12 @@ app.use('/api/uploads', uploadRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/system', systemRoutes);
+app.use('/api/chats', chatRoutes);
+app.use('/api/groups', groupRoutes);
+app.use('/api/messages', messageRoutes);
 
-// Socket.IO
-io.on('connection', (socket) => {
-  console.log('✅ User connected:', socket.id);
-
-  socket.on('message', (data) => {
-    io.emit('message', data);
-  });
-
-  socket.on('join-room', (roomId: string) => {
-    socket.join(roomId);
-  });
-
-  socket.on('disconnect', () => {
-    console.log('❌ User disconnected:', socket.id);
-  });
-});
+// Socket.IO — real-time chat with auth
+initSocketService(io);
 
 const PORT = process.env.PORT || 8080;
 httpServer.listen(PORT, () => {
