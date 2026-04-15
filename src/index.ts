@@ -17,6 +17,8 @@ import uploadRoutes from './routes/uploads';
 import bookingRoutes from './routes/bookings';
 import eventRoutes from './routes/events';
 import systemRoutes from './routes/system';
+import creditRoutes from './routes/credits';
+import { setIo } from './utils/socket';
 
 const app = express();
 const httpServer = createServer(app);
@@ -25,6 +27,7 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
 });
+setIo(io);
 
 // Middleware
 app.use(cors());
@@ -48,6 +51,7 @@ app.use('/api/uploads', uploadRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/system', systemRoutes);
+app.use('/api/credits', creditRoutes);
 
 // Socket.IO
 io.on('connection', (socket) => {
