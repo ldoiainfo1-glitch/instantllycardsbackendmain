@@ -121,7 +121,7 @@ describe('POST /api/auth/login', () => {
     expect(res.body.user.roles).toContain('customer');
   });
 
-  it('customer with active business promotion gets dual roles on login', async () => {
+  it('customer with active business promotion keeps customer role on login (role granted on payment)', async () => {
     // Create a fresh customer and inject an active promotion record
     const promoRes = await request(app).post('/api/auth/signup').send({
       phone: TEST_PHONE_PROMO,
@@ -140,17 +140,27 @@ describe('POST /api/auth/login', () => {
         owner_name: 'Promo Customer',
         listing_type: 'free',
         status: 'active',
-        is_active: true,
       },
     });
 
+    // Login should NOT auto-grant business role (role is granted only on payment verification)
     const loginRes = await request(app).post('/api/auth/login').send({
       phone: TEST_PHONE_PROMO,
       password: TEST_PASSWORD,
     });
     expect(loginRes.status).toBe(200);
     expect(loginRes.body.user.roles).toContain('customer');
-    expect(loginRes.body.user.roles).toContain('business');
+    // Business role is NOT auto-granted on login anymore
+    expect(loginRes.body.user.roles).not.toContain('business');
+  });
+
+  it('login response does not contain legacy businessApprovalStatus', async () => {
+    const res = await request(app).post('/api/auth/login').send({
+      phone: TEST_PHONE,
+      password: TEST_PASSWORD,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).not.toHaveProperty('businessApprovalStatus');
   });
 
   it('rejects wrong password', async () => {
@@ -159,6 +169,45 @@ describe('POST /api/auth/login', () => {
       password: 'wrong',
     });
     expect(res.status).toBe(401);
+  });
+
+  it('accepts loginType=customer for any user', async () => {
+    const res = await request(app).post('/api/auth/login').send({
+      phone: TEST_PHONE,
+      password: TEST_PASSWORD,
+      loginType: 'customer',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.user.roles).toContain('customer');
+  });
+
+  it('rejects loginType=business for user without business role', async () => {
+    const res = await request(app).post('/api/auth/login').send({
+      phone: TEST_PHONE,
+      password: TEST_PASSWORD,
+      loginType: 'business',
+    });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/business account/i);
+  });
+
+  it('allows loginType=business for user with business role', async () => {
+    const res = await request(app).post('/api/auth/login').send({
+      phone: TEST_PHONE_BIZ,
+      password: TEST_PASSWORD,
+      loginType: 'business',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.user.roles).toContain('business');
+  });
+
+  it('rejects invalid loginType value', async () => {
+    const res = await request(app).post('/api/auth/login').send({
+      phone: TEST_PHONE,
+      password: TEST_PASSWORD,
+      loginType: 'admin',
+    });
+    expect(res.status).toBe(422);
   });
 });
 

@@ -169,8 +169,7 @@ async function createCard(req, res) {
         const card = await prisma_1.default.businessCard.create({
             data: { ...data, user_id: req.user.userId, approval_status: 'pending' },
         });
-        // Business role is NOT auto-assigned here.
-        // It will be granted when admin approves the card.
+        // Business role is granted only via premium promotion payment (see promotionController).
         res.status(201).json(card);
     }
     catch (err) {

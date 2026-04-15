@@ -21,6 +21,7 @@ const uploads_1 = __importDefault(require("./routes/uploads"));
 const bookings_1 = __importDefault(require("./routes/bookings"));
 const events_1 = __importDefault(require("./routes/events"));
 const system_1 = __importDefault(require("./routes/system"));
+const scheduler_1 = require("./jobs/scheduler");
 const app = (0, express_1.default)();
 const httpServer = (0, http_1.createServer)(app);
 // Socket.IO
@@ -63,5 +64,6 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 8080;
 httpServer.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
+    (0, scheduler_1.startScheduledJobs)();
 });
 //# sourceMappingURL=index.js.map

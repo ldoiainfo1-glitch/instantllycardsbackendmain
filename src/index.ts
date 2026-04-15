@@ -17,6 +17,7 @@ import uploadRoutes from './routes/uploads';
 import bookingRoutes from './routes/bookings';
 import eventRoutes from './routes/events';
 import systemRoutes from './routes/system';
+import { startScheduledJobs } from './jobs/scheduler';
 
 const app = express();
 const httpServer = createServer(app);
@@ -69,4 +70,5 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 8080;
 httpServer.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
+  startScheduledJobs();
 });
