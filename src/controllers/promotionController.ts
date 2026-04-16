@@ -8,6 +8,165 @@ import { logEvent } from '../utils/logger';
 import { signAccessToken, signRefreshToken, hashToken, refreshTokenExpiry } from '../utils/jwt';
 import { rankLabelToTier, tierToScore, effectiveTier } from '../utils/tierFeatures';
 
+/**
+ * Legacy category name mapping: new L0 root → old/misspelled values stored in BusinessPromotion.category[].
+ * Built from co-occurrence analysis of 195,987 promo records on 2026-04-16.
+ * Only the top values (covering ~90% of legacy data) are mapped.
+ */
+const LEGACY_CATEGORY_MAP: Record<string, string[]> = {
+  'AC Services':              ['Ac & Appliances', 'AC & Appliances', 'AC Repair & Services', 'AC Installation Services'],
+  'Agriculture':              ['Fertilizer Dealers'],
+  'Apparel & Fashion':        ['Apprael & Fashion', 'Readymade Garment Retailers'],
+  'Astrology & Spiritual':    ['Kundali Matching', 'Vastu Consultation'],
+  'Automotive':               ['Car Repair & Services', 'Car Dealers'],
+  'Beauty & Wellness':        ['Home Services Offered'],
+  'Business Services':        ['GST Return', 'Accounting'],
+  'Cinemas & Entertainment':  ['Cinema Halls', 'Parking Available'],
+  'Cleaning Services':        ['Residential Cleaning Services', 'Eco Friendly Housekeeping', 'Housekeeping Services'],
+  'Construction & Interior':  ['Interior Designers', 'Civil Contractors', 'Building'],
+  'Digital Services':         ['Digitel Services', 'Digital marketing services', 'Digital Marketing Services'],
+  'Education & Training':     ['Tutorials', 'Computer Training Institutes', 'Counselling Sessions'],
+  'Electrical Services':      ['Electricians'],
+  'Event Services':           ['Event Organisers'],
+  'Financial Services':       ['Insurance Agents'],
+  'Fitness':                  ['Fitness Centres', 'Gyms', 'Get Your Own Trainer'],
+  'Groceries & Supermarkets': ['Grocier & Supermarket', 'Grocery Stores'],
+  'Healthcare':               ['General'],
+  'Home Design':              [''],
+  'Home Maintenance':         ['Plumbers'],
+  'Hotels & Hospitality':     [''],
+  'IT & Computer':            ['It & Computer', 'Computer Repair & Services'],
+  'Jewellery':                ['Jewellery Showrooms', 'Gold Jewellery', 'Pearl Jewellery'],
+  'Matrimony':                ['Matrimonial Bureaus'],
+  'Mobile Services':          ['Mobile Phone Repair & Services', 'Mobile Phone Dealers'],
+  'Packers & Movers':         [''],
+  'Pet Services':             ['Pets Available'],
+  'Pharmaceuticals & Chemists': ['Chemists'],
+  'Placement & Recruitment':  ['Placement & Recruitments', 'Placement Services (Candidate)'],
+  'Printing & Publishing':    ['Flex', 'Book', 'Digital'],
+  'Real Estate':              ['Estate Agents For Residential Rental', 'Real Estate Agents', 'Estate Agents For Residence', 'Estate Agents For Commercial Rental'],
+  'Registration':             [''],
+  'Scrap':                    ['Battery Scrap', 'Scrap Dealers'],
+  'Security Services':        ['Bodyguard'],
+  'Telecom & Internet Services': ['Internet Service Providers', 'Wifi Internet Service Providers'],
+  'Transport':                ['Transporters'],
+  'Travel & Tourism':         ['Travel Agents'],
+  'Warehouse':                ['Warehouses On Rent'],
+};
+
+// Remove empty strings from the map
+for (const key of Object.keys(LEGACY_CATEGORY_MAP)) {
+  LEGACY_CATEGORY_MAP[key] = LEGACY_CATEGORY_MAP[key].filter(Boolean);
+}
+
+/**
+ * Resolve a category name (leaf/L1/L0) into its full ancestor chain via Category table traversal.
+ * Returns { leaf, parent, root, chain } where chain = [leaf, parent, root].filter(Boolean).
+ * Falls back to [inputName] if no Category row is found.
+ */
+async function resolveCategoryChain(categoryName: string): Promise<{
+  leaf: string;
+  parent: string | null;
+  root: string;
+  chain: string[];
+}> {
+  const trimmed = categoryName.trim();
+  if (!trimmed) return { leaf: trimmed, parent: null, root: trimmed, chain: [trimmed] };
+
+  // Find the category node (case-insensitive)
+  const node = await prisma.category.findFirst({
+    where: { name: { equals: trimmed, mode: 'insensitive' }, is_active: true },
+    select: { id: true, name: true, parent_id: true, level: true },
+  });
+
+  if (!node) {
+    // Not in tree — return input as-is
+    return { leaf: trimmed, parent: null, root: trimmed, chain: [trimmed] };
+  }
+
+  // Walk up the parent chain
+  const names: string[] = [node.name];
+  let currentParentId = node.parent_id;
+  while (currentParentId !== null) {
+    const parentNode = await prisma.category.findUnique({
+      where: { id: currentParentId },
+      select: { id: true, name: true, parent_id: true },
+    });
+    if (!parentNode) break;
+    names.push(parentNode.name);
+    currentParentId = parentNode.parent_id;
+  }
+
+  // names = [leaf, ..., root] (leaf first, root last)
+  const leaf = names[0];
+  const root = names[names.length - 1];
+  const parent = names.length >= 2 ? names[1] : null;
+
+  return { leaf, parent, root, chain: [...new Set(names)] };
+}
+
+/**
+ * Build the final match set for a category name:
+ * 1. Tree traversal → chain (leaf + parent + root)
+ * 2. Legacy mapping → old/misspelled names for the root
+ * 3. Deduplicated union
+ */
+async function buildCategoryMatchSet(categoryName: string): Promise<string[]> {
+  const { chain, root } = await resolveCategoryChain(categoryName);
+  const legacyMatches = LEGACY_CATEGORY_MAP[root] || [];
+  const matchSet = [...new Set([...chain, ...legacyMatches])];
+
+  // STEP 1 — LOG CATEGORY CHAIN
+  console.log('[CATEGORY-CHAIN]', {
+    input: categoryName,
+    leaf: chain[0],
+    parent: chain.length >= 2 ? chain[1] : null,
+    root,
+    chain,
+  });
+
+  // STEP 2 — LOG LEGACY MAP HIT
+  console.log('[CATEGORY-LEGACY]', {
+    root,
+    legacyMatches,
+  });
+
+  // STEP 3 — LOG FINAL MATCH SET
+  console.log('[CATEGORY-MATCH-SET]', matchSet);
+
+  return matchSet;
+}
+
+/**
+ * Parse a category string (from legacy clients or business_cards) into individual category names.
+ * Handles: "Parent > Sub1, Sub2" → ["Parent", "Sub1", "Sub2"]
+ *          "Custom: xyz"         → ["xyz"]
+ *          "SingleCategory"      → ["SingleCategory"]
+ */
+function parseCategoryStringBackend(raw: string): string[] {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+
+  if (trimmed.startsWith('Custom:')) {
+    const custom = trimmed.slice('Custom:'.length).trim();
+    return custom ? [custom] : [];
+  }
+
+  if (trimmed.includes('>')) {
+    const [parentPart, ...rest] = trimmed.split('>');
+    const parent = parentPart.trim();
+    const subs = rest.join('>').split(',').map(s => s.trim()).filter(Boolean);
+    const result: string[] = [];
+    if (parent) result.push(parent);
+    for (const sub of subs) {
+      if (!result.includes(sub)) result.push(sub);
+    }
+    return result;
+  }
+
+  return [trimmed];
+}
+
 export async function listPromotions(req: Request, res: Response): Promise<void> {
   const page = queryInt(req.query.page, 1);
   const limit = queryInt(req.query.limit, 20);
@@ -35,9 +194,31 @@ export async function listPromotions(req: Request, res: Response): Promise<void>
       { email: { contains: search, mode: 'insensitive' } },
     ];
   }
-  if (category) where.category = { has: category };
+  if (category) {
+    const matchSet = await buildCategoryMatchSet(category);
+    where.category = { hasSome: matchSet };
+
+    // STEP 4 — VERIFY DB VALUES FOR TARGET PROMOTIONS (user_id 652)
+    const promos = await prisma.businessPromotion.findMany({
+      where: { user_id: 652 },
+      select: { id: true, business_name: true, category: true },
+    });
+    console.log('[PROMO-CATEGORIES]', promos);
+
+    // STEP 5 — CHECK MATCH MANUALLY
+    for (const promo of promos) {
+      console.log('[MATCH-CHECK]', {
+        business: promo.business_name,
+        categories: promo.category,
+        intersects: (promo.category as string[]).some((c: string) => matchSet.includes(c)),
+      });
+    }
+  }
   if (listingType) where.listing_type = listingType;
   if (status) { delete where.OR; where.status = status; }
+
+  // STEP 6 — PRINT FINAL QUERY WHERE
+  console.log('[FINAL-WHERE]', JSON.stringify(where, null, 2));
 
   const promotions = await prisma.businessPromotion.findMany({
     skip: (page - 1) * limit,
@@ -69,6 +250,9 @@ export async function listPromotions(req: Request, res: Response): Promise<void>
       created_at: true,
       updated_at: true,
       plan_name: true,
+      tier: true,
+      plan_type: true,
+      payment_status: true,
       status: true,
       expiry_date: true,
       business_card: {
@@ -105,11 +289,14 @@ export async function listPromotions(req: Request, res: Response): Promise<void>
       },
     },
   });
-  const data = promotions.map((p: any) => ({
-    ...p,
-    effectiveTier: effectiveTier(p.tier ?? 'free', p.status),
-    is_premium: (p.tier ?? 'free') !== 'free' && p.status === 'active',
-  }));
+  const data = promotions.map((p: any) => {
+    console.log('[PROMO-API] listPromotions', { id: p.id, tier: p.tier, status: p.status, payment_status: p.payment_status });
+    return {
+      ...p,
+      effectiveTier: effectiveTier(p.tier ?? 'free', p.status),
+      is_premium: (p.tier ?? 'free') !== 'free' && p.status === 'active',
+    };
+  });
   res.json({ data, page, limit });
 }
 
@@ -142,6 +329,9 @@ export async function getPromotion(req: Request, res: Response): Promise<void> {
       created_at: true,
       updated_at: true,
       plan_name: true,
+      tier: true,
+      plan_type: true,
+      payment_status: true,
       status: true,
       expiry_date: true,
       business_card: true,
@@ -149,6 +339,7 @@ export async function getPromotion(req: Request, res: Response): Promise<void> {
     },
   });
   if (!promo) { res.status(404).json({ error: 'Not found' }); return; }
+  console.log('[PROMO-API] getPromotion', { id: (promo as any).id, tier: (promo as any).tier, status: (promo as any).status, payment_status: (promo as any).payment_status });
   res.json({ ...promo, effectiveTier: effectiveTier((promo as any).tier ?? 'free', (promo as any).status) });
 }
 
@@ -160,6 +351,24 @@ export async function createPromotion(req: AuthRequest, res: Response): Promise<
     area, city, state, category, business_card_id,
     listing_type, listing_intent, plan_type,
   } = req.body;
+
+  // --- Category normalization ---
+  // Accept string or string[]; parse "Parent > Sub1, Sub2" format; resolve full chain via tree
+  const rawCategories: string[] = Array.isArray(category)
+    ? category.map((s: string) => s.trim()).filter(Boolean)
+    : typeof category === 'string' && category.trim()
+      ? parseCategoryStringBackend(category.trim())
+      : [];
+
+  // Resolve each raw value through the category tree to get full chains + legacy aliases
+  const resolvedSets = await Promise.all(rawCategories.map(c => buildCategoryMatchSet(c)));
+  const normalizedCategory = [...new Set(resolvedSets.flat())];
+
+  console.log('[PROMO-CREATE] Category normalization', {
+    rawInput: category,
+    parsed: rawCategories,
+    normalized: normalizedCategory,
+  });
 
   // Transaction-based idempotency: prevents duplicate promotions under concurrent requests
   const result = await prisma.$transaction(async (tx) => {
@@ -197,7 +406,7 @@ export async function createPromotion(req: AuthRequest, res: Response): Promise<
         area: area ?? null,
         city: city ?? null,
         state: state ?? null,
-        category: Array.isArray(category) ? category : (category ? [category] : []),
+        category: normalizedCategory,
         listing_type: listing_type ?? 'free',
         listing_intent: listing_intent ?? 'free',
         plan_type: plan_type ?? 'free',
@@ -255,6 +464,17 @@ export async function updatePromotion(req: AuthRequest, res: Response): Promise<
     if (req.body[key] !== undefined) data[key] = req.body[key];
   }
 
+  // Normalize category through tree resolution if it was updated
+  if (data.category !== undefined) {
+    const rawCats: string[] = Array.isArray(data.category)
+      ? data.category.map((s: string) => s.trim()).filter(Boolean)
+      : typeof data.category === 'string' && data.category.trim()
+        ? parseCategoryStringBackend(data.category.trim())
+        : [];
+    const resolvedSets = await Promise.all(rawCats.map(c => buildCategoryMatchSet(c)));
+    data.category = [...new Set(resolvedSets.flat())];
+  }
+
   const updated = await prisma.businessPromotion.update({ where: { id }, data });
   res.json(updated);
 }
@@ -287,15 +507,21 @@ export async function getMyPromotions(req: AuthRequest, res: Response): Promise<
       created_at: true,
       updated_at: true,
       plan_name: true,
+      tier: true,
+      plan_type: true,
+      payment_status: true,
       status: true,
       expiry_date: true,
     },
     orderBy: { created_at: 'desc' },
   });
-  res.json(promotions.map((p: any) => ({
-    ...p,
-    effectiveTier: effectiveTier(p.tier ?? 'free', p.status),
-  })));
+  res.json(promotions.map((p: any) => {
+    console.log('[PROMO-API] getMyPromotions', { id: p.id, tier: p.tier, status: p.status, payment_status: p.payment_status });
+    return {
+      ...p,
+      effectiveTier: effectiveTier(p.tier ?? 'free', p.status),
+    };
+  }));
 }
 
 /**
@@ -636,6 +862,9 @@ export async function listPromotionsNearby(req: Request, res: Response): Promise
   const radiusKm = radiusMeters / 1000;
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
 
+  // Resolve category match set once (tree traversal + legacy map), reuse in both Prisma and raw SQL paths
+  const categoryMatchValues = category ? await buildCategoryMatchSet(category) : [];
+
   const buildWhere = () => {
     const now = new Date();
     // Default: show active free + active non-expired premium + pending_payment (as free fallback)
@@ -657,7 +886,7 @@ export async function listPromotionsNearby(req: Request, res: Response): Promise
         { email: { contains: search, mode: 'insensitive' } },
       ];
     }
-    if (category) where.category = { has: category };
+    if (categoryMatchValues.length > 0) where.category = { hasSome: categoryMatchValues };
     if (listingType) where.listing_type = listingType;
     if (status) { delete where.OR; where.status = status; }
     if (city) where.city = { contains: city, mode: 'insensitive' };
@@ -698,6 +927,7 @@ export async function listPromotionsNearby(req: Request, res: Response): Promise
         plan_name: true,
         plan_type: true,
         tier: true,
+        payment_status: true,
         status: true,
         expiry_date: true,
         visibility_priority_score: true,
@@ -753,7 +983,7 @@ export async function listPromotionsNearby(req: Request, res: Response): Promise
   ];
   if (listingType) filters.push(Prisma.sql`p."listing_type" = ${listingType}`);
   if (status) { filters.length = 0; filters.push(Prisma.sql`p."status" = ${status}`); }
-  if (category) filters.push(Prisma.sql`p."category" && ARRAY[${category}]::text[]`);
+  if (categoryMatchValues.length > 0) filters.push(Prisma.sql`p."category" && ARRAY[${Prisma.join(categoryMatchValues)}]::text[]`);
   if (city) filters.push(Prisma.sql`p."city" ILIKE ${'%' + city + '%'}`);
   if (state) filters.push(Prisma.sql`p."state" ILIKE ${'%' + state + '%'}`);
   if (search) {
@@ -820,6 +1050,7 @@ export async function listPromotionsNearby(req: Request, res: Response): Promise
       plan_name: true,
       plan_type: true,
       tier: true,
+      payment_status: true,
       status: true,
       expiry_date: true,
       visibility_priority_score: true,

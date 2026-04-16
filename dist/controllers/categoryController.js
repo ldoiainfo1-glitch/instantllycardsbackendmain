@@ -515,29 +515,85 @@ async function deleteCategoryNode(req, res) {
 }
 async function getCategoryBusinessCards(req, res) {
     const id = (0, params_1.paramInt)(req.params.id);
-    const category = await prisma_1.default.category.findUnique({ where: { id } });
+    const category = await prisma_1.default.category.findUnique({
+        where: { id },
+        select: { id: true, name: true },
+    });
     if (!category) {
         res.status(404).json({ error: 'Not found' });
         return;
     }
     const page = (0, params_1.queryInt)(req.query.page, 1);
     const limit = Math.min((0, params_1.queryInt)(req.query.limit, 20), 50);
-    const cards = await prisma_1.default.businessCard.findMany({
-        where: { category: category.name },
+    // Collect category name + child category names so parent matches include children
+    const children = await prisma_1.default.category.findMany({
+        where: { parent_id: id, is_active: true },
+        select: { name: true },
+    });
+    const categoryNames = [category.name, ...children.map((c) => c.name)];
+    const now = new Date();
+    const promotions = await prisma_1.default.businessPromotion.findMany({
+        where: {
+            category: { hasSome: categoryNames },
+            OR: [
+                { status: 'active', OR: [{ expiry_date: null }, { expiry_date: { gt: now } }] },
+                { status: 'pending_payment' },
+            ],
+        },
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: { created_at: 'desc' },
+        orderBy: [
+            { visibility_priority_score: 'desc' },
+            { created_at: 'desc' },
+        ],
         select: {
             id: true,
-            full_name: true,
-            company_name: true,
-            logo_url: true,
+            business_card_id: true,
+            business_name: true,
+            owner_name: true,
+            description: true,
             category: true,
-            location: true,
+            email: true,
             phone: true,
+            whatsapp: true,
+            website: true,
+            business_hours: true,
+            area: true,
+            pincode: true,
+            city: true,
+            state: true,
+            listing_type: true,
+            tier: true,
+            plan_type: true,
+            payment_status: true,
+            status: true,
+            visibility_priority_score: true,
+            expiry_date: true,
             created_at: true,
+            updated_at: true,
+            business_card: {
+                select: {
+                    id: true,
+                    logo_url: true,
+                    services: true,
+                    offer: true,
+                    company_name: true,
+                    category: true,
+                    location: true,
+                    phone: true,
+                    email: true,
+                },
+            },
         },
     });
-    res.json({ data: cards, page, limit });
+    const data = promotions.map((p) => {
+        console.log('[PROMO-API] getCategoryBusinessCards', { id: p.id, tier: p.tier, status: p.status, payment_status: p.payment_status });
+        return {
+            ...p,
+            effectiveTier: (p.tier && p.status === 'active') ? p.tier : 'free',
+            is_premium: (p.tier ?? 'free') !== 'free' && p.status === 'active',
+        };
+    });
+    res.json({ data, page, limit });
 }
 //# sourceMappingURL=categoryController.js.map
