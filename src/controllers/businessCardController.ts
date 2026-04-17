@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { paramInt, queryInt, queryStr } from '../utils/params';
+import { getIO } from '../services/socketService';
 
 /** Whitelisted fields for card create/update — prevents arbitrary field injection. */
 const CARD_FIELDS = [
@@ -249,6 +250,25 @@ export async function shareCard(req: AuthRequest, res: Response): Promise<void> 
         sender_profile_picture: sender.profile_picture,
       },
     });
+    // Notify recipient in real-time via socket
+    if (recipient) {
+      try {
+        const io = getIO();
+        if (io) {
+          io.to(`user:${recipient.id}`).emit('card:shared', {
+            id: share.id,
+            card_id: share.card_id,
+            card_title: share.card_title,
+            card_photo: share.card_photo,
+            sender_id: share.sender_id,
+            sender_name: share.sender_name,
+            recipient_id: share.recipient_id,
+            sent_at: share.sent_at || share.created_at,
+          });
+        }
+      } catch { /* non-blocking */ }
+    }
+
     res.status(201).json(share);
   } catch (err) {
     console.error('[SHARE-CARD] Failed', err);

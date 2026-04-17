@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import prisma from '../prismaClient';
 import { AuthRequest } from '../middleware/auth';
+import { getIO } from '../services/socketService';
 
 /** POST /api/messages/send — REST fallback for sending a message (when socket unavailable) */
 export async function sendMessage(req: AuthRequest, res: Response) {
@@ -38,6 +39,33 @@ export async function sendMessage(req: AuthRequest, res: Response) {
         where: { id: groupId },
         data: { last_message_id: message.id, last_message_time: message.created_at },
       });
+
+      // Emit real-time notification to all other group members via their personal socket room
+      try {
+        const io = getIO();
+        if (io) {
+          const members = await prisma.groupMember.findMany({
+            where: { group_id: groupId, user_id: { not: userId } },
+            select: { user_id: true },
+          });
+          const group = await prisma.group.findUnique({
+            where: { id: groupId },
+            select: { name: true },
+          });
+          const payload = {
+            groupId,
+            groupName: group?.name ?? 'Group',
+            senderId: userId,
+            senderName: message.sender?.name ?? 'Someone',
+            content: message.content,
+            messageType: message.message_type,
+            createdAt: message.created_at,
+          };
+          for (const m of members) {
+            io.to(`user:${m.user_id}`).emit('group:notification', payload);
+          }
+        }
+      } catch { /* non-blocking */ }
 
       return res.status(201).json(formatMsg(message));
     }
