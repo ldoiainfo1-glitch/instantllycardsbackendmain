@@ -342,7 +342,7 @@ router.post('/transfer', (async (req: AuthRequest, res: Response): Promise<void>
  */
 router.get('/referral-stats', (async (req: AuthRequest, res: Response) => {
   try {
-    const userId = req.userId!;
+    const userId = req.user!.userId;
     let user = await prisma.user.findUnique({
       where: { id: userId },
       select: { referral_code: true },

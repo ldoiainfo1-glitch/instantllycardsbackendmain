@@ -63,12 +63,22 @@ export async function signup(req: Request, res: Response): Promise<void> {
         where: { referral_code: referralCode.trim().toUpperCase() },
         select: { id: true },
       });
-      if (referrer) {
-        referrerId = referrer.id;
-        log(`[SIGNUP] Referrer found — referralCode: ${referralCode}, referrerId: ${referrerId}`);
-      } else {
-        warn(`[SIGNUP] Invalid referral code: ${referralCode} — ignoring`);
+      if (!referrer) {
+        warn(`[SIGNUP] Invalid referral code: ${referralCode}`);
+        res.status(400).json({ error: 'Invalid referral code' });
+        return;
       }
+      // Prevent self-referral
+      const existingUser = await prisma.user.findFirst({
+        where: { referral_code: referralCode.trim().toUpperCase() },
+        select: { id: true, phone: true },
+      });
+      if (existingUser && normalizedPhone && phoneVariants(phone).includes(existingUser.phone ?? '')) {
+        res.status(400).json({ error: 'You cannot use your own referral code' });
+        return;
+      }
+      referrerId = referrer.id;
+      log(`[SIGNUP] Referrer found — referralCode: ${referralCode}, referrerId: ${referrerId}`);
     }
 
     // Atomic transaction: user + role + refresh token all succeed or all roll back
@@ -144,7 +154,7 @@ export async function signup(req: Request, res: Response): Promise<void> {
 
 function generateReferralCode(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 }
 
 async function generateUniqueReferralCode(): Promise<string> {
@@ -201,11 +211,11 @@ async function processReferralReward(referrerId: number, newUserId: number): Pro
 
       await tx.transaction.create({
         data: {
-          type: 'referral_bonus',
+          type: 'signup_bonus',
           to_user_id: newUserId,
           from_user_id: referrerId,
           amount: rewardAmount,
-          description: `Welcome bonus: signed up with a referral code`,
+          description: `Signup bonus: joined via referral code`,
           status: 'completed',
           balance_after: newUserNewBalance,
         },
