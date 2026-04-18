@@ -2,7 +2,7 @@ import { Router, RequestHandler } from 'express';
 import { body } from 'express-validator';
 import { authenticate } from '../middleware/auth';
 import { validate } from '../middleware/validate';
-import { getProfile, updateProfile, getUserById, getUserLocation, upsertUserLocation, deleteMe, matchContacts } from '../controllers/userController';
+import { getProfile, updateProfile, getUserById, getUserLocation, upsertUserLocation, deleteMe, matchContacts, updatePushToken } from '../controllers/userController';
 
 const router = Router();
 const h = (fn: Function) => fn as RequestHandler;
@@ -19,6 +19,7 @@ router.post(
   validate,
   h(matchContacts)
 );
+router.put('/push-token', authenticate, h(updatePushToken));
 router.get('/:id', authenticate, h(getUserById));
 
 export default router;
