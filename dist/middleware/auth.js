@@ -1,9 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.authenticate = authenticate;
+exports.authenticate = void 0;
 exports.requireRole = requireRole;
 const jwt_1 = require("../utils/jwt");
-function authenticate(req, res, next) {
+const authenticate = (req, res, next) => {
     const header = req.headers.authorization;
     if (!header?.startsWith("Bearer ")) {
         res.status(401).json({ error: "Missing or invalid Authorization header" });
@@ -17,14 +17,16 @@ function authenticate(req, res, next) {
     catch {
         res.status(401).json({ error: "Token expired or invalid" });
     }
-}
+};
+exports.authenticate = authenticate;
 function requireRole(...roles) {
     return (req, res, next) => {
-        if (!req.user) {
+        const authReq = req;
+        if (!authReq.user) {
             res.status(401).json({ error: "Unauthenticated" });
             return;
         }
-        const hasRole = roles.some((r) => req.user.roles.includes(r));
+        const hasRole = roles.some((r) => authReq.user.roles.includes(r));
         if (!hasRole) {
             res.status(403).json({ error: "Forbidden" });
             return;

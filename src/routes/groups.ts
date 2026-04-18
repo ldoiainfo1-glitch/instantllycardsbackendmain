@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, RequestHandler } from 'express';
 import { authenticate } from '../middleware/auth';
 import {
   getGroups,
@@ -15,19 +15,20 @@ import {
 } from '../controllers/groupController';
 
 const router = Router();
+const h = (fn: Function) => fn as RequestHandler;
 
 router.use(authenticate);
 
-router.get('/', getGroups as any);
-router.post('/', createGroup as any);
-router.post('/join', joinGroup as any);
-router.get('/:groupId', getGroupDetail as any);
-router.put('/:groupId', updateGroup as any);
-router.get('/:groupId/messages', getGroupMessages as any);
-router.get('/:groupId/media', getGroupMedia as any);
-router.post('/:groupId/start-sharing', startSharing as any);
-router.post('/:groupId/stop-sharing', stopSharing as any);
-router.post('/:groupId/members', addMembers as any);
-router.delete('/:groupId/members/:memberId', removeMember as any);
+router.get('/', h(getGroups));
+router.post('/', h(createGroup));
+router.post('/join', h(joinGroup));
+router.get('/:groupId', h(getGroupDetail));
+router.put('/:groupId', h(updateGroup));
+router.get('/:groupId/messages', h(getGroupMessages));
+router.get('/:groupId/media', h(getGroupMedia));
+router.post('/:groupId/start-sharing', h(startSharing));
+router.post('/:groupId/stop-sharing', h(stopSharing));
+router.post('/:groupId/members', h(addMembers));
+router.delete('/:groupId/members/:memberId', h(removeMember));
 
 export default router;

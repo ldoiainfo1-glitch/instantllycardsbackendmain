@@ -1,14 +1,14 @@
-import { Router } from 'express';
+import { Router, RequestHandler } from 'express';
 import { body } from 'express-validator';
 import rateLimit from 'express-rate-limit';
 import { validate } from '../middleware/validate';
 import { authenticate } from '../middleware/auth';
-import { 
-  signup, 
-  login, 
-  refresh, 
-  logout, 
-  me, 
+import {
+  signup,
+  login,
+  refresh,
+  logout,
+  me,
   changePassword,
   sendPasswordResetOTP,
   verifyPasswordResetOTP,
@@ -16,9 +16,8 @@ import {
 } from '../controllers/authController';
 
 const router = Router();
+const h = (fn: Function) => fn as RequestHandler;
 
-// Strict rate limit for credential endpoints: 10 attempts per 15 minutes per IP.
-// Disabled in test environment to allow integration tests to run without hitting the limit.
 const authRateLimit =
   process.env.NODE_ENV === 'test'
     ? (_req: any, _res: any, next: any) => next()
@@ -39,7 +38,7 @@ router.post(
     body('role').optional().isIn(['customer', 'business']).withMessage('Role must be customer or business'),
   ],
   validate,
-  signup
+  h(signup)
 );
 
 router.post(
@@ -54,12 +53,12 @@ router.post(
     body('loginType').optional().isIn(['customer', 'business']).withMessage('loginType must be customer or business'),
   ],
   validate,
-  login
+  h(login)
 );
 
-router.post('/refresh', authRateLimit, refresh);
-router.post('/logout', authenticate, logout);
-router.get('/me', authenticate, me);
+router.post('/refresh', authRateLimit, h(refresh));
+router.post('/logout', authenticate, h(logout));
+router.get('/me', authenticate, h(me));
 router.post(
   '/change-password',
   authenticate,
@@ -68,10 +67,9 @@ router.post(
     body('newPassword').isLength({ min: 6 }).withMessage('New password must be at least 6 characters'),
   ],
   validate,
-  changePassword
+  h(changePassword)
 );
 
-// Forgot password routes
 router.post(
   '/forgot-password/send-otp',
   authRateLimit,
@@ -79,7 +77,7 @@ router.post(
     body('phone').notEmpty().withMessage('Phone number is required'),
   ],
   validate,
-  sendPasswordResetOTP
+  h(sendPasswordResetOTP)
 );
 
 router.post(
@@ -90,7 +88,7 @@ router.post(
     body('otp').notEmpty().withMessage('OTP is required'),
   ],
   validate,
-  verifyPasswordResetOTP
+  h(verifyPasswordResetOTP)
 );
 
 router.post(
@@ -102,7 +100,7 @@ router.post(
     body('newPassword').isLength({ min: 6 }).withMessage('New password must be at least 6 characters'),
   ],
   validate,
-  resetPassword
+  h(resetPassword)
 );
 
 export default router;
