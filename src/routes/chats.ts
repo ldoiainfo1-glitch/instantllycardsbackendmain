@@ -1,14 +1,15 @@
-import { Router } from 'express';
+import { Router, RequestHandler } from 'express';
 import { authenticate } from '../middleware/auth';
 import { getConversations, getChatMessages, findOrCreateChat, toggleMute } from '../controllers/chatController';
 
 const router = Router();
+const h = (fn: Function) => fn as RequestHandler;
 
 router.use(authenticate);
 
-router.get('/', getConversations as any);
-router.get('/:chatId/messages', getChatMessages as any);
-router.post('/find-or-create', findOrCreateChat as any);
-router.put('/:chatId/mute', toggleMute as any);
+router.get('/', h(getConversations));
+router.get('/:chatId/messages', h(getChatMessages));
+router.post('/find-or-create', h(findOrCreateChat));
+router.put('/:chatId/mute', h(toggleMute));
 
 export default router;

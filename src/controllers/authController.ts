@@ -25,7 +25,7 @@ async function getUserRoles(userId: number): Promise<string[]> {
 }
 
 export async function signup(req: Request, res: Response): Promise<void> {
-  const { phone, email, password, name, role = 'customer' } = req.body;
+  const { phone, email, password, name, role = 'customer', referralCode } = req.body;
   const normalizedPhone = phone ? normalizePhone(phone) : phone;
   log(`[SIGNUP] Attempt — phone: ${phone} → normalized: ${normalizedPhone}, email: ${email ?? 'N/A'}, name: ${name ?? 'N/A'}, role: ${role}`);
 
@@ -55,12 +55,37 @@ export async function signup(req: Request, res: Response): Promise<void> {
     const password_hash = await bcrypt.hash(password, 10);
     const roles = [role];
 
+    // Generate a unique referral code for the new user
+    const newReferralCode = await generateUniqueReferralCode();
+
+    // Look up referrer if a referral code was provided
+    let referrerId: number | null = null;
+    if (referralCode && typeof referralCode === 'string' && referralCode.trim().length > 0) {
+      const referrer = await prisma.user.findFirst({
+        where: { referral_code: referralCode.trim().toUpperCase() },
+        select: { id: true },
+      });
+      if (referrer) {
+        referrerId = referrer.id;
+        log(`[SIGNUP] Referrer found — referralCode: ${referralCode}, referrerId: ${referrerId}`);
+      } else {
+        warn(`[SIGNUP] Invalid referral code: ${referralCode} — ignoring`);
+      }
+    }
+
     // Atomic transaction: user + role + refresh token all succeed or all roll back
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
-        data: { phone: normalizedPhone, email: email || null, password_hash, name: name || null },
+        data: {
+          phone: normalizedPhone,
+          email: email || null,
+          password_hash,
+          name: name || null,
+          referral_code: newReferralCode,
+          referred_by_id: referrerId,
+        },
       });
-      log(`[SIGNUP] User created — id: ${user.id}, phone: ${user.phone}`);
+      log(`[SIGNUP] User created — id: ${user.id}, phone: ${user.phone}, referralCode: ${newReferralCode}`);
 
       await tx.userRole.create({ data: { user_id: user.id, role } });
       log(`[SIGNUP] Role assigned — userId: ${user.id}, role: ${role}`);
@@ -77,8 +102,22 @@ export async function signup(req: Request, res: Response): Promise<void> {
       });
       log(`[SIGNUP] Tokens issued — userId: ${user.id}`);
 
+      // Create referral record if referred
+      if (referrerId) {
+        await tx.referral.create({
+          data: { referrer_id: referrerId, referred_id: user.id, status: 'completed', reward_given: false },
+        });
+      }
+
       return { user, accessToken, refreshToken };
     });
+
+    // Award referral bonus OUTSIDE the main transaction (non-blocking)
+    if (referrerId) {
+      processReferralReward(referrerId, result.user.id).catch((err) => {
+        console.error('[SIGNUP] Referral reward processing failed (non-blocking):', err);
+      });
+    }
 
     res.status(201).json({
       accessToken: result.accessToken,
@@ -89,6 +128,7 @@ export async function signup(req: Request, res: Response): Promise<void> {
         email: result.user.email,
         name: result.user.name,
         roles,
+        referralCode: newReferralCode,
       },
     });
 
@@ -111,6 +151,90 @@ export async function signup(req: Request, res: Response): Promise<void> {
     }
     console.error('[SIGNUP] Failed', err);
     res.status(500).json({ error: 'Signup failed' });
+  }
+}
+
+// ── Referral helpers ───────────────────────────────────────────────────────────
+
+function generateReferralCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
+async function generateUniqueReferralCode(): Promise<string> {
+  for (let i = 0; i < 20; i++) {
+    const code = generateReferralCode();
+    const exists = await prisma.user.findFirst({ where: { referral_code: code } });
+    if (!exists) return code;
+  }
+  // Fallback: timestamp-based
+  return generateReferralCode() + Date.now().toString(36).slice(-2).toUpperCase();
+}
+
+async function processReferralReward(referrerId: number, newUserId: number): Promise<void> {
+  try {
+    // Get config
+    const config = await prisma.creditConfig.findFirst();
+    const rewardAmount = config?.referral_reward ?? 300;
+
+    if (rewardAmount <= 0) return;
+
+    const [referrer, newUser] = await Promise.all([
+      prisma.user.findUnique({ where: { id: referrerId } }),
+      prisma.user.findUnique({ where: { id: newUserId } }),
+    ]);
+    if (!referrer || !newUser) return;
+
+    const referrerNewBalance = Number(referrer.credits ?? 0) + rewardAmount;
+    const newUserNewBalance = Number(newUser.credits ?? 0) + rewardAmount;
+
+    await prisma.$transaction(async (tx) => {
+      // Award credits to referrer
+      await tx.user.update({
+        where: { id: referrerId },
+        data: { credits: BigInt(referrerNewBalance) },
+      });
+
+      await tx.transaction.create({
+        data: {
+          type: 'referral_bonus',
+          to_user_id: referrerId,
+          from_user_id: newUserId,
+          amount: rewardAmount,
+          description: `Referral bonus: new user signed up with your code`,
+          status: 'completed',
+          balance_after: referrerNewBalance,
+        },
+      });
+
+      // Award credits to new user (referred user)
+      await tx.user.update({
+        where: { id: newUserId },
+        data: { credits: BigInt(newUserNewBalance) },
+      });
+
+      await tx.transaction.create({
+        data: {
+          type: 'referral_bonus',
+          to_user_id: newUserId,
+          from_user_id: referrerId,
+          amount: rewardAmount,
+          description: `Welcome bonus: signed up with a referral code`,
+          status: 'completed',
+          balance_after: newUserNewBalance,
+        },
+      });
+
+      // Mark referral as reward given
+      await tx.referral.updateMany({
+        where: { referrer_id: referrerId, referred_id: newUserId },
+        data: { reward_given: true },
+      });
+    });
+
+    log(`[REFERRAL] Awarded ${rewardAmount} credits each to referrer ${referrerId} and new user ${newUserId}`);
+  } catch (err) {
+    console.error('[REFERRAL] Failed to process reward:', err);
   }
 }
 

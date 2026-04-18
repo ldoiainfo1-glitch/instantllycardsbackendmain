@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response, RequestHandler } from 'express';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import prisma from '../utils/prisma';
 import { getIo } from '../utils/socket';
@@ -20,44 +20,45 @@ import {
 } from '../controllers/adminController';
 
 const router = Router();
+const h = (fn: Function) => fn as RequestHandler;
 
 router.use(authenticate, requireRole('admin'));
 
-router.get('/dashboard', getDashboardCounts);
-router.get('/users', listUsers);
+router.get('/dashboard', h(getDashboardCounts));
+router.get('/users', h(listUsers));
 
 // Promotions
-router.get('/promotions/pending', getPendingPromotions);
-router.post('/promotions/:id/approve', approvePromotion);
-router.post('/promotions/:id/reject', rejectPromotion);
+router.get('/promotions/pending', h(getPendingPromotions));
+router.post('/promotions/:id/approve', h(approvePromotion));
+router.post('/promotions/:id/reject', h(rejectPromotion));
 
 // Listings
-router.get('/businesses', listBusinesses);
-router.post('/businesses/:id/approve', approveBusinessCard);
-router.post('/businesses/:id/reject', rejectBusinessCard);
-router.get('/events', listEvents);
-router.get('/vouchers', listVouchers);
-router.get('/reviews', listReviews);
+router.get('/businesses', h(listBusinesses));
+router.post('/businesses/:id/approve', h(approveBusinessCard));
+router.post('/businesses/:id/reject', h(rejectBusinessCard));
+router.get('/events', h(listEvents));
+router.get('/vouchers', h(listVouchers));
+router.get('/reviews', h(listReviews));
 
 // Ad campaigns
-router.get('/ads', listAdCampaigns);
+router.get('/ads', h(listAdCampaigns));
 router.get('/ads/:id', async (req, res) => {
   const { getAdCampaignDetails } = await import('../controllers/adminController');
-  return getAdCampaignDetails(req, res);
+  return getAdCampaignDetails(req as unknown as AuthRequest, res);
 });
-router.post('/ads/:id/approve', approveAdCampaign);
-router.post('/ads/:id/reject', rejectAdCampaign);
+router.post('/ads/:id/approve', h(approveAdCampaign));
+router.post('/ads/:id/reject', h(rejectAdCampaign));
 router.post('/ads/:id/pause', async (req, res) => {
   const { pauseAdCampaign } = await import('../controllers/adminController');
-  return pauseAdCampaign(req, res);
+  return pauseAdCampaign(req as unknown as AuthRequest, res);
 });
 router.post('/ads/:id/resume', async (req, res) => {
   const { resumeAdCampaign } = await import('../controllers/adminController');
-  return resumeAdCampaign(req, res);
+  return resumeAdCampaign(req as unknown as AuthRequest, res);
 });
 router.post('/ads/:id/delete', async (req, res) => {
   const { deleteAdCampaign } = await import('../controllers/adminController');
-  return deleteAdCampaign(req, res);
+  return deleteAdCampaign(req as unknown as AuthRequest, res);
 });
 
 // ── Credit management ─────────────────────────────────────────────────────────
@@ -70,7 +71,7 @@ function randomAlphaNumeric(len: number): string {
 }
 
 // POST /api/admin/transfer-credits
-router.post('/transfer-credits', async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/transfer-credits', async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId, amount, note } = req.body;
     const creditAmount = Number(amount);
@@ -107,7 +108,7 @@ router.post('/transfer-credits', async (req: AuthRequest, res: Response): Promis
 });
 
 // PUT /api/admin/users/:id/update-credits
-router.put('/users/:id/update-credits', async (req: AuthRequest, res: Response): Promise<void> => {
+router.put('/users/:id/update-credits', async (req: Request, res: Response): Promise<void> => {
   try {
     const { credits } = req.body;
     const userId = Number(req.params.id);
@@ -143,7 +144,7 @@ router.put('/users/:id/update-credits', async (req: AuthRequest, res: Response):
 });
 
 // GET /api/admin/all-transactions
-router.get('/all-transactions', async (req: AuthRequest, res: Response): Promise<void> => {
+router.get('/all-transactions', async (req: Request, res: Response): Promise<void> => {
   try {
     const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
     const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '20'), 10)));

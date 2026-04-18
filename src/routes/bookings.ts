@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, RequestHandler } from 'express';
 import { body } from 'express-validator';
 import { validate } from '../middleware/validate';
 import { authenticate } from '../middleware/auth';
@@ -11,10 +11,11 @@ import {
 } from '../controllers/bookingController';
 
 const router = Router();
+const h = (fn: Function) => fn as RequestHandler;
 
-router.get('/my', authenticate, listMyBookings);
-router.get('/business/:businessId', authenticate, listBusinessBookings);
-router.get('/:id', authenticate, getBooking);
+router.get('/my', authenticate, h(listMyBookings));
+router.get('/business/:businessId', authenticate, h(listBusinessBookings));
+router.get('/:id', authenticate, h(getBooking));
 router.post(
   '/',
   authenticate,
@@ -24,14 +25,14 @@ router.post(
     body('customer_phone').notEmpty(),
   ],
   validate,
-  createBooking
+  h(createBooking)
 );
 router.patch(
   '/:id/status',
   authenticate,
   [body('status').notEmpty()],
   validate,
-  updateBookingStatus
+  h(updateBookingStatus)
 );
 
 export default router;

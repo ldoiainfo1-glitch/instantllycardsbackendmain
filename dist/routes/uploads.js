@@ -8,7 +8,6 @@ const multer_1 = __importDefault(require("multer"));
 const auth_1 = require("../middleware/auth");
 const s3_1 = require("../utils/s3");
 const router = (0, express_1.Router)();
-// 5 MB limit, images only
 const upload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024 },
@@ -21,7 +20,6 @@ const upload = (0, multer_1.default)({
         }
     },
 });
-// ─── Business logo upload ───────────────────────────────────────────────────
 router.post('/image', auth_1.authenticate, upload.single('file'), async (req, res) => {
     try {
         if (!req.file) {
@@ -39,7 +37,6 @@ router.post('/image', auth_1.authenticate, upload.single('file'), async (req, re
         res.status(500).json({ error: 'Upload failed' });
     }
 });
-// ─── Ad creative upload ─────────────────────────────────────────────────────
 router.post('/ad-creative', auth_1.authenticate, upload.single('file'), async (req, res) => {
     try {
         if (!req.file) {
@@ -58,7 +55,6 @@ router.post('/ad-creative', auth_1.authenticate, upload.single('file'), async (r
         res.status(500).json({ error: 'Upload failed' });
     }
 });
-// ─── Chat / group image upload ────────────────────────────────────────────────
 router.post('/chat-image', auth_1.authenticate, upload.single('file'), async (req, res) => {
     try {
         if (!req.file) {

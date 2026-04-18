@@ -14,6 +14,7 @@ exports.getSharedCards = getSharedCards;
 exports.bulkSendCard = bulkSendCard;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const params_1 = require("../utils/params");
+const socketService_1 = require("../services/socketService");
 /** Whitelisted fields for card create/update — prevents arbitrary field injection. */
 const CARD_FIELDS = [
     'full_name', 'birthdate', 'anniversary', 'gender', 'phone', 'whatsapp', 'telegram',
@@ -240,6 +241,18 @@ async function shareCard(req, res) {
         const recipient = recipient_user_id
             ? await prisma_1.default.user.findUnique({ where: { id: parseInt(recipient_user_id) } })
             : null;
+        // Prevent duplicate shares of the same card to the same recipient
+        const existing = await prisma_1.default.sharedCard.findFirst({
+            where: {
+                card_id: card.id,
+                sender_id: String(sender.id),
+                recipient_id: recipient ? String(recipient.id) : '0',
+            },
+        });
+        if (existing) {
+            res.status(200).json({ ...existing, alreadyShared: true });
+            return;
+        }
         const share = await prisma_1.default.sharedCard.create({
             data: {
                 card_id: card.id,
@@ -253,6 +266,25 @@ async function shareCard(req, res) {
                 sender_profile_picture: sender.profile_picture,
             },
         });
+        // Notify recipient in real-time via socket
+        if (recipient) {
+            try {
+                const io = (0, socketService_1.getIO)();
+                if (io) {
+                    io.to(`user:${recipient.id}`).emit('card:shared', {
+                        id: share.id,
+                        card_id: share.card_id,
+                        card_title: share.card_title,
+                        card_photo: share.card_photo,
+                        sender_id: share.sender_id,
+                        sender_name: share.sender_name,
+                        recipient_id: share.recipient_id,
+                        sent_at: share.sent_at || share.created_at,
+                    });
+                }
+            }
+            catch { /* non-blocking */ }
+        }
         res.status(201).json(share);
     }
     catch (err) {
