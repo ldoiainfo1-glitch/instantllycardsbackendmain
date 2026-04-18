@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { verifyAccessToken, JwtPayload } from "../utils/jwt";
 
 export interface AuthRequest extends Request {
+  userId: any;
   user?: JwtPayload;
   file?: Express.Multer.File;
   files?:
