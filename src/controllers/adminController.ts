@@ -2,6 +2,8 @@ import { Response } from 'express';
 import prisma from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { paramInt, queryInt } from '../utils/params';
+import { getIO } from '../services/socketService';
+import { sendExpoPushNotification } from '../utils/push';
 
 export async function getDashboardCounts(_req: AuthRequest, res: Response): Promise<void> {
   const [users, businessCards, promotions, vouchers, categories, reviews, feedbacks, ads, adCampaigns, bookings, events] =
@@ -41,6 +43,16 @@ export async function getPendingPromotions(req: AuthRequest, res: Response): Pro
 export async function approvePromotion(req: AuthRequest, res: Response): Promise<void> {
   const id = paramInt(req.params.id);
   const promo = await prisma.businessPromotion.update({ where: { id }, data: { status: 'active' } });
+
+  try {
+    const owner = await prisma.user.findUnique({ where: { id: promo.user_id }, select: { id: true, push_token: true } });
+    if (owner) {
+      const io = getIO();
+      if (io) io.to(`user:${owner.id}`).emit('promotion:approved', { promotionId: id, title: promo.title });
+      if (owner.push_token) sendExpoPushNotification(owner.push_token, 'Promotion Approved', `Your promotion "${promo.title}" has been approved!`, { screen: 'Promotions' });
+    }
+  } catch { /* non-blocking */ }
+
   res.json(promo);
 }
 
@@ -48,6 +60,16 @@ export async function rejectPromotion(req: AuthRequest, res: Response): Promise<
   const id = paramInt(req.params.id);
   const { reason } = req.body;
   const promo = await prisma.businessPromotion.update({ where: { id }, data: { status: 'rejected' } });
+
+  try {
+    const owner = await prisma.user.findUnique({ where: { id: promo.user_id }, select: { id: true, push_token: true } });
+    if (owner) {
+      const io = getIO();
+      if (io) io.to(`user:${owner.id}`).emit('promotion:rejected', { promotionId: id, title: promo.title, reason });
+      if (owner.push_token) sendExpoPushNotification(owner.push_token, 'Promotion Rejected', `Your promotion "${promo.title}" was rejected${reason ? ': ' + reason : ''}`, { screen: 'Promotions' });
+    }
+  } catch { /* non-blocking */ }
+
   res.json({ ...promo, rejection_reason: reason });
 }
 
@@ -86,6 +108,16 @@ export async function approveAdCampaign(req: AuthRequest, res: Response): Promis
     where: { id },
     data: { approval_status: 'approved', status: 'active' },
   });
+
+  try {
+    const owner = await prisma.user.findUnique({ where: { id: campaign.user_id }, select: { id: true, push_token: true } });
+    if (owner) {
+      const io = getIO();
+      if (io) io.to(`user:${owner.id}`).emit('ad:approved', { campaignId: id, title: campaign.title });
+      if (owner.push_token) sendExpoPushNotification(owner.push_token, 'Ad Campaign Approved', `Your ad "${campaign.title}" is now live!`, { screen: 'Ads' });
+    }
+  } catch { /* non-blocking */ }
+
   res.json(campaign);
 }
 
@@ -95,6 +127,16 @@ export async function rejectAdCampaign(req: AuthRequest, res: Response): Promise
     where: { id },
     data: { approval_status: 'rejected', status: 'paused' },
   });
+
+  try {
+    const owner = await prisma.user.findUnique({ where: { id: campaign.user_id }, select: { id: true, push_token: true } });
+    if (owner) {
+      const io = getIO();
+      if (io) io.to(`user:${owner.id}`).emit('ad:rejected', { campaignId: id, title: campaign.title });
+      if (owner.push_token) sendExpoPushNotification(owner.push_token, 'Ad Campaign Rejected', `Your ad "${campaign.title}" was not approved`, { screen: 'Ads' });
+    }
+  } catch { /* non-blocking */ }
+
   res.json(campaign);
 }
 
@@ -247,6 +289,16 @@ export async function approveBusinessCard(req: AuthRequest, res: Response): Prom
     await prisma.userRole.create({ data: { user_id: card.user_id, role: 'business' } });
   }
 
+  // Notify card owner
+  try {
+    const owner = await prisma.user.findUnique({ where: { id: card.user_id }, select: { id: true, push_token: true } });
+    if (owner) {
+      const io = getIO();
+      if (io) io.to(`user:${owner.id}`).emit('card:approved', { cardId: id, cardName: updated.company_name || updated.full_name });
+      if (owner.push_token) sendExpoPushNotification(owner.push_token, 'Business Card Approved', `Your business card "${updated.company_name || updated.full_name}" has been approved!`, { screen: 'MyCards' });
+    }
+  } catch { /* non-blocking */ }
+
   res.json(updated);
 }
 
@@ -256,6 +308,17 @@ export async function rejectBusinessCard(req: AuthRequest, res: Response): Promi
     where: { id },
     data: { approval_status: 'rejected' },
   });
+
+  // Notify card owner
+  try {
+    const owner = await prisma.user.findUnique({ where: { id: card.user_id }, select: { id: true, push_token: true } });
+    if (owner) {
+      const io = getIO();
+      if (io) io.to(`user:${owner.id}`).emit('card:rejected', { cardId: id, cardName: card.company_name || card.full_name });
+      if (owner.push_token) sendExpoPushNotification(owner.push_token, 'Business Card Rejected', `Your business card "${card.company_name || card.full_name}" was not approved`, { screen: 'MyCards' });
+    }
+  } catch { /* non-blocking */ }
+
   res.json(card);
 }
 

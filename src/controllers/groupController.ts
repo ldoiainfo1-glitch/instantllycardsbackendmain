@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import prisma from '../prismaClient';
 import { AuthRequest } from '../middleware/auth';
 import { getIO } from '../services/socketService';
+import { sendExpoPushNotification } from '../utils/push';
 
 
 
@@ -119,11 +120,66 @@ export async function joinGroup(req: AuthRequest, res: Response) {
     const existing = await prisma.groupMember.findUnique({
       where: { group_id_user_id: { group_id: group.id, user_id: userId } },
     });
-    if (existing) return res.json({ id: group.id, name: group.name, adminId: group.admin_id, alreadyMember: true });
+    if (existing) {
+      // Send "Welcome back" notification to the returning user
+      try {
+        const io = getIO();
+        const returningUser = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, push_token: true } });
+        const payload = { groupId: group.id, groupName: group.name, isWelcomeBack: true };
+        if (io) io.to(`user:${userId}`).emit('group:welcome_back', payload);
+        if (returningUser?.push_token) {
+          sendExpoPushNotification(returningUser.push_token, `Welcome back! 👋`, `You're already part of "${group.name}". Tap to open the chat.`, { screen: 'GroupChat', groupId: group.id, groupName: group.name });
+        }
+      } catch { /* non-blocking */ }
+      return res.json({ id: group.id, name: group.name, adminId: group.admin_id, alreadyMember: true });
+    }
 
     await prisma.groupMember.create({
       data: { group_id: group.id, user_id: userId, role: 'member' },
     });
+
+    // Get joiner's name for notifications
+    const joiner = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+    const joinerName = joiner?.name ?? 'Someone';
+
+    // Notify all existing members (socket + FCM) and the joiner (socket + FCM)
+    try {
+      const io = getIO();
+      const allMembers = await prisma.groupMember.findMany({
+        where: { group_id: group.id },
+        include: { user: { select: { id: true, push_token: true } } },
+      });
+
+      for (const m of allMembers) {
+        const isJoiner = m.user_id === userId;
+        const title = isJoiner ? `Welcome to ${group.name}! 🎉` : `${group.name}`;
+        const body = isJoiner
+          ? `You've joined "${group.name}". Say hello to the group!`
+          : `${joinerName} joined the group.`;
+        const payload = {
+          groupId: group.id,
+          groupName: group.name,
+          joinerId: userId,
+          joinerName,
+          isJoiner,
+        };
+
+        // Real-time socket event
+        if (io) {
+          io.to(`user:${m.user_id}`).emit('group:member_joined', payload);
+        }
+
+        // FCM push (works even if app is closed)
+        if (m.user?.push_token) {
+          sendExpoPushNotification(
+            m.user.push_token,
+            title,
+            body,
+            { screen: 'GroupChat', groupId: group.id, groupName: group.name },
+          );
+        }
+      }
+    } catch { /* non-blocking */ }
 
     res.json({ id: group.id, name: group.name, adminId: group.admin_id, alreadyMember: false });
   } catch (err: any) {
@@ -279,6 +335,36 @@ export async function removeMember(req: AuthRequest, res: Response) {
       where: { group_id_user_id: { group_id: groupId, user_id: memberId } },
     });
 
+    // Notify the removed/leaving member and remaining group members
+    try {
+      const io = getIO();
+      const removedUser = await prisma.user.findUnique({ where: { id: memberId }, select: { id: true, name: true, push_token: true } });
+      const isSelfLeave = memberId === userId;
+
+      // Notify the removed member (if kicked by admin)
+      if (!isSelfLeave && removedUser) {
+        const payload = { groupId, groupName: group.name };
+        if (io) io.to(`user:${memberId}`).emit('group:removed', payload);
+        if (removedUser.push_token) {
+          sendExpoPushNotification(removedUser.push_token, 'Removed from Group', `You were removed from "${group.name}"`, { screen: 'Messaging' });
+        }
+      }
+
+      // Notify remaining members
+      const remainingMembers = await prisma.groupMember.findMany({
+        where: { group_id: groupId },
+        include: { user: { select: { id: true, push_token: true } } },
+      });
+      const memberName = removedUser?.name ?? 'A member';
+      const body = isSelfLeave ? `${memberName} left the group` : `${memberName} was removed from the group`;
+      for (const m of remainingMembers) {
+        if (io) io.to(`user:${m.user_id}`).emit('group:member_left', { groupId, groupName: group.name, memberName, isSelfLeave });
+        if (m.user?.push_token) {
+          sendExpoPushNotification(m.user.push_token, group.name, body, { screen: 'GroupChat', groupId, groupName: group.name });
+        }
+      }
+    } catch { /* non-blocking */ }
+
     res.json({ ok: true });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to remove member' });
@@ -301,9 +387,15 @@ export async function startSharing(req: AuthRequest, res: Response) {
     // Emit socket event to all group members
     const io = getIO();
     if (io) {
-      const members = await prisma.groupMember.findMany({ where: { group_id: groupId }, select: { user_id: true } });
+      const members = await prisma.groupMember.findMany({
+        where: { group_id: groupId },
+        include: { user: { select: { id: true, push_token: true } } },
+      });
       members.forEach((m) => {
         io.to(`user:${m.user_id}`).emit('group:sharing_started', { groupId, joinCode: group.join_code });
+        if (m.user?.push_token) {
+          sendExpoPushNotification(m.user.push_token, group.name, 'Card sharing session started!', { screen: 'GroupChat', groupId, groupName: group.name });
+        }
       });
     }
 
@@ -325,6 +417,20 @@ export async function stopSharing(req: AuthRequest, res: Response) {
     if (group.admin_id !== userId) return res.status(403).json({ error: 'Only admin can stop sharing' });
 
     await prisma.group.update({ where: { id: groupId }, data: { is_sharing: false } as any });
+
+    // Notify members that sharing stopped
+    try {
+      const io = getIO();
+      if (io) {
+        const membersForNotify = await prisma.groupMember.findMany({
+          where: { group_id: groupId },
+          include: { user: { select: { id: true, push_token: true } } },
+        });
+        for (const m of membersForNotify) {
+          io.to(`user:${m.user_id}`).emit('group:sharing_stopped', { groupId, groupName: group.name });
+        }
+      }
+    } catch { /* non-blocking */ }
 
     // Keep only participants who actually shared at least one card;
     // this prevents join-by-code members from persisting when they never shared.
@@ -452,6 +558,35 @@ export async function addMembers(req: AuthRequest, res: Response) {
       await prisma.groupMember.createMany({
         data: newIds.map((id: number) => ({ group_id: groupId, user_id: id, role: 'member' })),
       });
+
+      // Notify each added member + existing members
+      try {
+        const io = getIO();
+        const admin = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+        const addedUsers = await prisma.user.findMany({ where: { id: { in: newIds } }, select: { id: true, name: true, push_token: true } });
+        const existingMembersList = await prisma.groupMember.findMany({
+          where: { group_id: groupId, user_id: { notIn: newIds } },
+          include: { user: { select: { id: true, push_token: true } } },
+        });
+
+        // Notify added users
+        for (const u of addedUsers) {
+          const payload = { groupId, groupName: group.name, addedBy: admin?.name ?? 'Admin' };
+          if (io) io.to(`user:${u.id}`).emit('group:added', payload);
+          if (u.push_token) {
+            sendExpoPushNotification(u.push_token, 'Added to Group', `${admin?.name ?? 'Admin'} added you to "${group.name}"`, { screen: 'GroupChat', groupId, groupName: group.name });
+          }
+        }
+
+        // Notify existing members about the new additions
+        const addedNames = addedUsers.map((u) => u.name).filter(Boolean).join(', ') || 'New members';
+        for (const m of existingMembersList) {
+          if (io) io.to(`user:${m.user_id}`).emit('group:members_added', { groupId, groupName: group.name, addedNames });
+          if (m.user?.push_token) {
+            sendExpoPushNotification(m.user.push_token, group.name, `${addedNames} joined the group`, { screen: 'GroupChat', groupId, groupName: group.name });
+          }
+        }
+      } catch { /* non-blocking */ }
     }
 
     res.json({ added: newIds.length });

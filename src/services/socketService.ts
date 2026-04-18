@@ -1,6 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import prisma from '../prismaClient';
+import { sendExpoPushNotification } from '../utils/push';
 
 interface AuthSocket extends Socket {
   userId?: number;
@@ -79,6 +80,29 @@ export function initSocketService(io: Server) {
           });
 
           io.to(`chat:${message.chat_id}`).emit('message:new', formatMsg(message));
+
+          // Notify the other group members' personal rooms + FCM
+          const groupMembers = await prisma.groupMember.findMany({
+            where: { group_id: groupId, user_id: { not: userId } },
+            include: { user: { select: { id: true, push_token: true } } },
+          });
+          const grp = await prisma.group.findUnique({ where: { id: groupId }, select: { name: true } });
+          for (const m of groupMembers) {
+            io.to(`user:${m.user_id}`).emit('group:notification', {
+              groupId,
+              groupName: grp?.name ?? 'Group',
+              senderId: userId,
+              senderName: message.sender?.name ?? 'Someone',
+              content: message.content,
+              messageType: message.message_type,
+              createdAt: message.created_at,
+            });
+            if (m.user?.push_token) {
+              const isCard = message.message_type === 'card' || (() => { try { const p = JSON.parse(content); return !!(p?.full_name || p?.company_name); } catch { return false; } })();
+              const body = isCard ? 'Sent a business card' : content.length > 60 ? content.slice(0, 60) + '...' : content;
+              sendExpoPushNotification(m.user.push_token, grp?.name ?? 'Group', `${message.sender?.name ?? 'Someone'}: ${body}`, { screen: 'GroupChat', groupId, groupName: grp?.name });
+            }
+          }
         } else {
           let chat = chatId ? await prisma.chat.findUnique({ where: { id: chatId } }) : null;
 
@@ -125,6 +149,13 @@ export function initSocketService(io: Server) {
               chatId: chat.id,
               message: formatMsg(message),
             });
+            // FCM push for DM when app is closed
+            try {
+              const recipient = await prisma.user.findUnique({ where: { id: receiverId }, select: { push_token: true } });
+              if (recipient?.push_token) {
+                sendExpoPushNotification(recipient.push_token, message.sender?.name ?? 'New Message', content.length > 60 ? content.slice(0, 60) + '...' : content, { screen: 'Chat', chatId: chat.id });
+              }
+            } catch { /* non-blocking */ }
           }
         }
 
