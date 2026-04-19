@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getProfile = getProfile;
 exports.updateProfile = updateProfile;
+exports.updatePushToken = updatePushToken;
 exports.getUserById = getUserById;
 exports.getUserLocation = getUserLocation;
 exports.upsertUserLocation = upsertUserLocation;
@@ -62,6 +63,24 @@ async function updateProfile(req, res) {
         },
     });
     res.json({ message: 'Profile updated' });
+}
+async function updatePushToken(req, res) {
+    const { pushToken } = req.body;
+    const userId = req.user.userId;
+    if (!pushToken || typeof pushToken !== 'string') {
+        res.status(400).json({ error: 'pushToken is required' });
+        return;
+    }
+    // Only accept Expo push tokens
+    if (!pushToken.startsWith('ExponentPushToken[')) {
+        res.status(400).json({ error: 'Invalid push token format' });
+        return;
+    }
+    await prisma_1.default.user.update({
+        where: { id: userId },
+        data: { push_token: pushToken, push_token_updated_at: new Date() },
+    });
+    res.json({ message: 'Push token updated' });
 }
 async function getUserById(req, res) {
     const userId = (0, params_1.paramInt)(req.params.id);

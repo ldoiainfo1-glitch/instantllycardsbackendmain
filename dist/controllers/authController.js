@@ -18,6 +18,8 @@ const jwt_1 = require("../utils/jwt");
 const serialize_1 = require("../utils/serialize");
 const phone_1 = require("../utils/phone");
 const otp_1 = require("../utils/otp");
+const socketService_1 = require("../services/socketService");
+const push_1 = require("../utils/push");
 const IS_PROD = process.env.NODE_ENV === 'production';
 const log = (...args) => { if (!IS_PROD)
     console.log(...args); };
@@ -63,13 +65,22 @@ async function signup(req, res) {
                 where: { referral_code: referralCode.trim().toUpperCase() },
                 select: { id: true },
             });
-            if (referrer) {
-                referrerId = referrer.id;
-                log(`[SIGNUP] Referrer found — referralCode: ${referralCode}, referrerId: ${referrerId}`);
+            if (!referrer) {
+                warn(`[SIGNUP] Invalid referral code: ${referralCode}`);
+                res.status(400).json({ error: 'Invalid referral code' });
+                return;
             }
-            else {
-                warn(`[SIGNUP] Invalid referral code: ${referralCode} — ignoring`);
+            // Prevent self-referral
+            const existingUser = await prisma_1.default.user.findFirst({
+                where: { referral_code: referralCode.trim().toUpperCase() },
+                select: { id: true, phone: true },
+            });
+            if (existingUser && normalizedPhone && (0, phone_1.phoneVariants)(phone).includes(existingUser.phone ?? '')) {
+                res.status(400).json({ error: 'You cannot use your own referral code' });
+                return;
             }
+            referrerId = referrer.id;
+            log(`[SIGNUP] Referrer found — referralCode: ${referralCode}, referrerId: ${referrerId}`);
         }
         // Atomic transaction: user + role + refresh token all succeed or all roll back
         const result = await prisma_1.default.$transaction(async (tx) => {
@@ -122,6 +133,18 @@ async function signup(req, res) {
                 referralCode: newReferralCode,
             },
         });
+        // Send welcome notification to new user (socket — FCM token not available yet)
+        try {
+            const io = (0, socketService_1.getIO)();
+            if (io) {
+                io.to(`user:${result.user.id}`).emit('welcome', {
+                    type: 'welcome',
+                    title: `Welcome to Instantlly Cards! 🎉`,
+                    body: `Hi ${result.user.name ?? 'there'}! Your account is ready. Start exploring business cards, events & more.`,
+                });
+            }
+        }
+        catch { /* non-blocking */ }
     }
     catch (err) {
         if (err?.code === 'P2002') {
@@ -136,7 +159,7 @@ async function signup(req, res) {
 // ── Referral helpers ───────────────────────────────────────────────────────────
 function generateReferralCode() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 }
 async function generateUniqueReferralCode() {
     for (let i = 0; i < 20; i++) {
@@ -187,11 +210,11 @@ async function processReferralReward(referrerId, newUserId) {
             });
             await tx.transaction.create({
                 data: {
-                    type: 'referral_bonus',
+                    type: 'signup_bonus',
                     to_user_id: newUserId,
                     from_user_id: referrerId,
                     amount: rewardAmount,
-                    description: `Welcome bonus: signed up with a referral code`,
+                    description: `Signup bonus: joined via referral code`,
                     status: 'completed',
                     balance_after: newUserNewBalance,
                 },
@@ -256,6 +279,21 @@ async function login(req, res) {
             refreshToken,
             user: { id: user.id, phone: user.phone, email: user.email, name: user.name, roles },
         });
+        // Send welcome back notification (socket + FCM if token exists)
+        try {
+            const io = (0, socketService_1.getIO)();
+            const welcomePayload = {
+                type: 'welcome_back',
+                title: `Welcome back! 👋`,
+                body: `Good to see you again, ${user.name ?? 'there'}!`,
+            };
+            if (io)
+                io.to(`user:${user.id}`).emit('welcome_back', welcomePayload);
+            if (user.push_token) {
+                (0, push_1.sendExpoPushNotification)(user.push_token, `Welcome back! 👋`, `Good to see you again, ${user.name ?? 'there'}!`, {});
+            }
+        }
+        catch { /* non-blocking */ }
     }
     catch (err) {
         console.error('[LOGIN] Failed', err);

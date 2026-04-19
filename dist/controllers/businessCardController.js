@@ -15,6 +15,7 @@ exports.bulkSendCard = bulkSendCard;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const params_1 = require("../utils/params");
 const socketService_1 = require("../services/socketService");
+const push_1 = require("../utils/push");
 /** Whitelisted fields for card create/update — prevents arbitrary field injection. */
 const CARD_FIELDS = [
     'full_name', 'birthdate', 'anniversary', 'gender', 'phone', 'whatsapp', 'telegram',
@@ -282,6 +283,11 @@ async function shareCard(req, res) {
                         sent_at: share.sent_at || share.created_at,
                     });
                 }
+                // FCM push for when app is closed
+                const recipientUser = await prisma_1.default.user.findUnique({ where: { id: recipient.id }, select: { push_token: true } });
+                if (recipientUser?.push_token) {
+                    (0, push_1.sendExpoPushNotification)(recipientUser.push_token, 'New Business Card', `${share.sender_name} shared their card with you`, { screen: 'Messaging', tab: 'Received' });
+                }
             }
             catch { /* non-blocking */ }
         }
@@ -390,6 +396,27 @@ async function bulkSendCard(req, res) {
             })),
             skipDuplicates: true,
         });
+        // Notify each recipient via socket + FCM
+        try {
+            const io = (0, socketService_1.getIO)();
+            const recipientUsers = await prisma_1.default.user.findMany({
+                where: { id: { in: newRecipients.map((r) => r.user_id) } },
+                select: { id: true, push_token: true },
+            });
+            for (const u of recipientUsers) {
+                if (io) {
+                    io.to(`user:${u.id}`).emit('card:shared', {
+                        card_id: cardId,
+                        card_title: senderCard.company_name || senderCard.full_name,
+                        sender_name: sender.name || sender.phone,
+                    });
+                }
+                if (u.push_token) {
+                    (0, push_1.sendExpoPushNotification)(u.push_token, 'New Business Card', `${sender.name || sender.phone} shared their card with you`, { screen: 'Messaging', tab: 'Received' });
+                }
+            }
+        }
+        catch { /* non-blocking */ }
         res.status(201).json({
             sent: newRecipients.length,
             audience,

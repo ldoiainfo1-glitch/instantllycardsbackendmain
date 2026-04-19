@@ -14,6 +14,8 @@ exports.getMyTransfers = getMyTransfers;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const params_1 = require("../utils/params");
 const phone_1 = require("../utils/phone");
+const socketService_1 = require("../services/socketService");
+const push_1 = require("../utils/push");
 async function listVouchers(req, res) {
     const page = (0, params_1.queryInt)(req.query.page, 1);
     const limit = (0, params_1.queryInt)(req.query.limit, 20);
@@ -102,6 +104,23 @@ async function claimVoucher(req, res) {
         prisma_1.default.voucherClaim.create({ data: { voucher_id: id, user_id: req.user.userId } }),
         prisma_1.default.voucher.update({ where: { id }, data: { claimed_count: { increment: 1 } } }),
     ]);
+    // Notify voucher creator
+    try {
+        if (voucher.owner_user_id && voucher.owner_user_id !== req.user.userId) {
+            const owner = await prisma_1.default.user.findUnique({ where: { id: voucher.owner_user_id }, select: { id: true, push_token: true } });
+            const claimer = await prisma_1.default.user.findUnique({ where: { id: req.user.userId }, select: { name: true } });
+            if (owner) {
+                const io = (0, socketService_1.getIO)();
+                const payload = { type: 'voucher:claimed', voucherId: id, voucherTitle: voucher.title, claimerName: claimer?.name ?? 'Someone' };
+                if (io)
+                    io.to(`user:${owner.id}`).emit('voucher:claimed', payload);
+                if (owner.push_token) {
+                    (0, push_1.sendExpoPushNotification)(owner.push_token, 'Voucher Claimed', `${claimer?.name ?? 'Someone'} claimed your voucher "${voucher.title}"`, { screen: 'Vouchers' });
+                }
+            }
+        }
+    }
+    catch { /* non-blocking */ }
     res.status(201).json(claim);
 }
 async function transferVoucher(req, res) {
@@ -138,6 +157,20 @@ async function transferVoucher(req, res) {
             recipient_phone: normalizedRecipientPhone,
         },
     });
+    // Notify recipient about the voucher transfer
+    try {
+        const recipientUser = await prisma_1.default.user.findUnique({ where: { id: recipient.id }, select: { id: true, push_token: true } });
+        if (recipientUser) {
+            const io = (0, socketService_1.getIO)();
+            const payload = { type: 'voucher:transferred', transferId: transfer.id, voucherId: vId, voucherTitle: voucher.title, senderName: sender?.name ?? 'Someone' };
+            if (io)
+                io.to(`user:${recipientUser.id}`).emit('voucher:transferred', payload);
+            if (recipientUser.push_token) {
+                (0, push_1.sendExpoPushNotification)(recipientUser.push_token, 'Voucher Received', `${sender?.name ?? 'Someone'} transferred a voucher "${voucher.title}" to you`, { screen: 'Vouchers' });
+            }
+        }
+    }
+    catch { /* non-blocking */ }
     res.status(201).json(transfer);
 }
 async function getMyVouchers(req, res) {

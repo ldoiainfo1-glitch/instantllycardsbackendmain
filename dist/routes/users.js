@@ -13,6 +13,7 @@ router.delete('/me', auth_1.authenticate, h(userController_1.deleteMe));
 router.get('/location', auth_1.authenticate, h(userController_1.getUserLocation));
 router.put('/location', auth_1.authenticate, h(userController_1.upsertUserLocation));
 router.post('/match-contacts', auth_1.authenticate, [(0, express_validator_1.body)('phones').isArray({ min: 1 }).withMessage('phones must be a non-empty array')], validate_1.validate, h(userController_1.matchContacts));
+router.put('/push-token', auth_1.authenticate, h(userController_1.updatePushToken));
 router.get('/:id', auth_1.authenticate, h(userController_1.getUserById));
 exports.default = router;
 //# sourceMappingURL=users.js.map

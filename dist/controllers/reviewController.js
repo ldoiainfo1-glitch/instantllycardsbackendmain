@@ -8,6 +8,8 @@ exports.createReview = createReview;
 exports.createFeedback = createFeedback;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const params_1 = require("../utils/params");
+const socketService_1 = require("../services/socketService");
+const push_1 = require("../utils/push");
 async function getCardReviews(req, res) {
     const cardId = (0, params_1.paramInt)(req.params.cardId);
     const reviews = await prisma_1.default.review.findMany({
@@ -35,6 +37,24 @@ async function createReview(req, res) {
             photo_url: photo_url || null,
         },
     });
+    // Notify business card owner about the new review
+    try {
+        const card = await prisma_1.default.businessCard.findUnique({ where: { id: parseInt(business_id) }, select: { user_id: true, company_name: true, full_name: true } });
+        if (card) {
+            const owner = await prisma_1.default.user.findUnique({ where: { id: card.user_id }, select: { id: true, push_token: true } });
+            const reviewer = await prisma_1.default.user.findUnique({ where: { id: req.user.userId }, select: { name: true } });
+            if (owner && owner.id !== req.user.userId) {
+                const io = (0, socketService_1.getIO)();
+                const payload = { type: 'review:created', reviewId: review.id, businessId: parseInt(business_id), rating: parseInt(rating), reviewerName: reviewer?.name ?? 'Someone' };
+                if (io)
+                    io.to(`user:${owner.id}`).emit('review:created', payload);
+                if (owner.push_token) {
+                    (0, push_1.sendExpoPushNotification)(owner.push_token, 'New Review', `${reviewer?.name ?? 'Someone'} left a ${rating}-star review on ${card.company_name || card.full_name}`, { screen: 'Reviews' });
+                }
+            }
+        }
+    }
+    catch { /* non-blocking */ }
     res.status(201).json(review);
 }
 async function createFeedback(req, res) {

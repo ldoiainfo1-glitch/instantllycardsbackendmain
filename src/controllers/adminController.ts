@@ -48,8 +48,8 @@ export async function approvePromotion(req: AuthRequest, res: Response): Promise
     const owner = await prisma.user.findUnique({ where: { id: promo.user_id }, select: { id: true, push_token: true } });
     if (owner) {
       const io = getIO();
-      if (io) io.to(`user:${owner.id}`).emit('promotion:approved', { promotionId: id, title: promo.title });
-      if (owner.push_token) sendExpoPushNotification(owner.push_token, 'Promotion Approved', `Your promotion "${promo.title}" has been approved!`, { screen: 'Promotions' });
+      if (io) io.to(`user:${owner.id}`).emit('promotion:approved', { promotionId: id, title: promo.business_name });
+      if (owner.push_token) sendExpoPushNotification(owner.push_token, 'Promotion Approved', `Your promotion "${promo.business_name}" has been approved!`, { screen: 'Promotions' });
     }
   } catch { /* non-blocking */ }
 
@@ -65,8 +65,8 @@ export async function rejectPromotion(req: AuthRequest, res: Response): Promise<
     const owner = await prisma.user.findUnique({ where: { id: promo.user_id }, select: { id: true, push_token: true } });
     if (owner) {
       const io = getIO();
-      if (io) io.to(`user:${owner.id}`).emit('promotion:rejected', { promotionId: id, title: promo.title, reason });
-      if (owner.push_token) sendExpoPushNotification(owner.push_token, 'Promotion Rejected', `Your promotion "${promo.title}" was rejected${reason ? ': ' + reason : ''}`, { screen: 'Promotions' });
+      if (io) io.to(`user:${owner.id}`).emit('promotion:rejected', { promotionId: id, title: promo.business_name, reason });
+      if (owner.push_token) sendExpoPushNotification(owner.push_token, 'Promotion Rejected', `Your promotion "${promo.business_name}" was rejected${reason ? ': ' + reason : ''}`, { screen: 'Promotions' });
     }
   } catch { /* non-blocking */ }
 

@@ -71,7 +71,7 @@ export async function sendMessage(req: AuthRequest, res: Response) {
             where: { group_id: groupId, user_id: { not: userId } },
             include: { user: { select: { id: true, push_token: true } } },
           });
-          const isCard = message.message_type === 'card' || (() => { try { const p = JSON.parse(content); return !!(p?.full_name || p?.company_name); } catch { return false; } })();
+          const isCard = (() => { try { const p = JSON.parse(content); return !!(p?.full_name || p?.company_name); } catch { return false; } })();
           const body = isCard ? 'Sent a business card' : content.length > 60 ? content.slice(0, 60) + '...' : content;
           for (const m of membersWithTokens) {
             if (m.user?.push_token) {

@@ -10,6 +10,8 @@ exports.createBooking = createBooking;
 exports.updateBookingStatus = updateBookingStatus;
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const params_1 = require("../utils/params");
+const socketService_1 = require("../services/socketService");
+const push_1 = require("../utils/push");
 async function listMyBookings(req, res) {
     const page = (0, params_1.queryInt)(req.query.page, 1);
     const limit = (0, params_1.queryInt)(req.query.limit, 20);
@@ -98,6 +100,20 @@ async function createBooking(req, res) {
         },
         include: { business: { select: { id: true, company_name: true, logo_url: true } } },
     });
+    // Notify business owner in real-time
+    try {
+        const businessOwner = await prisma_1.default.user.findUnique({ where: { id: card.user_id }, select: { id: true, push_token: true } });
+        if (businessOwner) {
+            const io = (0, socketService_1.getIO)();
+            const payload = { type: 'booking:created', bookingId: booking.id, businessName: booking.business_name, customerName: customer_name || 'A customer' };
+            if (io)
+                io.to(`user:${businessOwner.id}`).emit('booking:created', payload);
+            if (businessOwner.push_token) {
+                (0, push_1.sendExpoPushNotification)(businessOwner.push_token, 'New Booking', `${customer_name || 'A customer'} booked ${booking.business_name}`, { screen: 'Bookings' });
+            }
+        }
+    }
+    catch { /* non-blocking */ }
     res.status(201).json(booking);
 }
 async function updateBookingStatus(req, res) {
@@ -129,6 +145,21 @@ async function updateBookingStatus(req, res) {
         return;
     }
     const updated = await prisma_1.default.booking.update({ where: { id }, data: { status } });
+    // Notify the other party about the status change
+    try {
+        const notifyUserId = isBusinessOwner ? booking.user_id : booking.business.user_id;
+        const notifyUser = await prisma_1.default.user.findUnique({ where: { id: notifyUserId }, select: { id: true, push_token: true } });
+        if (notifyUser) {
+            const io = (0, socketService_1.getIO)();
+            const payload = { type: 'booking:updated', bookingId: id, status, businessName: booking.business_name };
+            if (io)
+                io.to(`user:${notifyUser.id}`).emit('booking:updated', payload);
+            if (notifyUser.push_token) {
+                (0, push_1.sendExpoPushNotification)(notifyUser.push_token, 'Booking Updated', `Your booking has been ${status}`, { screen: 'Bookings' });
+            }
+        }
+    }
+    catch { /* non-blocking */ }
     res.json(updated);
 }
 //# sourceMappingURL=bookingController.js.map
