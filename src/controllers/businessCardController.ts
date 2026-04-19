@@ -3,6 +3,7 @@ import prisma from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { paramInt, queryInt, queryStr } from '../utils/params';
 import { getIO } from '../services/socketService';
+import { sendExpoPushNotification } from '../utils/push';
 
 /** Whitelisted fields for card create/update — prevents arbitrary field injection. */
 const CARD_FIELDS = [
@@ -266,6 +267,11 @@ export async function shareCard(req: AuthRequest, res: Response): Promise<void> 
             sent_at: share.sent_at || share.created_at,
           });
         }
+        // FCM push for when app is closed
+        const recipientUser = await prisma.user.findUnique({ where: { id: recipient.id }, select: { push_token: true } });
+        if (recipientUser?.push_token) {
+          sendExpoPushNotification(recipientUser.push_token, 'New Business Card', `${share.sender_name} shared their card with you`, { screen: 'Messaging', tab: 'Received' });
+        }
       } catch { /* non-blocking */ }
     }
 
@@ -388,6 +394,27 @@ export async function bulkSendCard(req: AuthRequest, res: Response): Promise<voi
       })),
       skipDuplicates: true,
     });
+
+    // Notify each recipient via socket + FCM
+    try {
+      const io = getIO();
+      const recipientUsers = await prisma.user.findMany({
+        where: { id: { in: newRecipients.map((r) => r.user_id) } },
+        select: { id: true, push_token: true },
+      });
+      for (const u of recipientUsers) {
+        if (io) {
+          io.to(`user:${u.id}`).emit('card:shared', {
+            card_id: cardId,
+            card_title: senderCard.company_name || senderCard.full_name,
+            sender_name: sender.name || sender.phone,
+          });
+        }
+        if (u.push_token) {
+          sendExpoPushNotification(u.push_token, 'New Business Card', `${sender.name || sender.phone} shared their card with you`, { screen: 'Messaging', tab: 'Received' });
+        }
+      }
+    } catch { /* non-blocking */ }
 
     res.status(201).json({
       sent: newRecipients.length,

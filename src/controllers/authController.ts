@@ -12,6 +12,8 @@ import { AuthRequest } from '../middleware/auth';
 import { jsonSafe } from '../utils/serialize';
 import { normalizePhone, phoneVariants } from '../utils/phone';
 import { generateOTP, storeOTP, verifyOTP, sendOTP } from '../utils/otp';
+import { getIO } from '../services/socketService';
+import { sendExpoPushNotification } from '../utils/push';
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 const log = (...args: any[]) => { if (!IS_PROD) console.log(...args); };
@@ -129,6 +131,18 @@ export async function signup(req: Request, res: Response): Promise<void> {
         referralCode: newReferralCode,
       },
     });
+
+    // Send welcome notification to new user (socket — FCM token not available yet)
+    try {
+      const io = getIO();
+      if (io) {
+        io.to(`user:${result.user.id}`).emit('welcome', {
+          type: 'welcome',
+          title: `Welcome to Instantlly Cards! 🎉`,
+          body: `Hi ${result.user.name ?? 'there'}! Your account is ready. Start exploring business cards, events & more.`,
+        });
+      }
+    } catch { /* non-blocking */ }
   } catch (err: any) {
     if (err?.code === 'P2002') {
       warn(`[SIGNUP] Conflict (unique constraint) — ${normalizedPhone ?? email}`);
@@ -280,6 +294,20 @@ export async function login(req: Request, res: Response): Promise<void> {
       refreshToken,
       user: { id: user.id, phone: user.phone, email: user.email, name: user.name, roles },
     });
+
+    // Send welcome back notification (socket + FCM if token exists)
+    try {
+      const io = getIO();
+      const welcomePayload = {
+        type: 'welcome_back',
+        title: `Welcome back! 👋`,
+        body: `Good to see you again, ${user.name ?? 'there'}!`,
+      };
+      if (io) io.to(`user:${user.id}`).emit('welcome_back', welcomePayload);
+      if (user.push_token) {
+        sendExpoPushNotification(user.push_token, `Welcome back! 👋`, `Good to see you again, ${user.name ?? 'there'}!`, {});
+      }
+    } catch { /* non-blocking */ }
   } catch (err: any) {
     console.error('[LOGIN] Failed', err);
     res.status(500).json({ error: 'Login failed' });

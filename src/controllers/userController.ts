@@ -57,6 +57,29 @@ export async function updateProfile(req: AuthRequest, res: Response): Promise<vo
   res.json({ message: 'Profile updated' });
 }
 
+export async function updatePushToken(req: AuthRequest, res: Response): Promise<void> {
+  const { pushToken } = req.body;
+  const userId = req.user!.userId;
+
+  if (!pushToken || typeof pushToken !== 'string') {
+    res.status(400).json({ error: 'pushToken is required' });
+    return;
+  }
+
+  // Only accept Expo push tokens
+  if (!pushToken.startsWith('ExponentPushToken[')) {
+    res.status(400).json({ error: 'Invalid push token format' });
+    return;
+  }
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { push_token: pushToken, push_token_updated_at: new Date() },
+  });
+
+  res.json({ message: 'Push token updated' });
+}
+
 export async function getUserById(req: AuthRequest, res: Response): Promise<void> {
   const userId = paramInt(req.params.id);
   const user = await prisma.user.findUnique({
