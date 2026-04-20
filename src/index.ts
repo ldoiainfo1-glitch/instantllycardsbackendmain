@@ -23,6 +23,7 @@ import { startScheduledJobs } from './jobs/scheduler';
 import chatRoutes from './routes/chats';
 import groupRoutes from './routes/groups';
 import messageRoutes from './routes/messages';
+import notificationRoutes from './routes/notifications';
 import { initSocketService } from './services/socketService';
 
 const app = express();
@@ -131,6 +132,7 @@ app.use('/api/credits', creditRoutes);
 app.use('/api/chats', chatRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Socket.IO — real-time chat with auth
 initSocketService(io);

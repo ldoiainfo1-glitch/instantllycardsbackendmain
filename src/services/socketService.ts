@@ -97,10 +97,21 @@ export function initSocketService(io: Server) {
               messageType: message.message_type,
               createdAt: message.created_at,
             });
+            const isCard = message.message_type === 'card' || (() => { try { const p = JSON.parse(content); return !!(p?.full_name || p?.company_name); } catch { return false; } })();
+            const body = isCard ? 'Sent a business card' : content.length > 60 ? content.slice(0, 60) + '...' : content;
+            const notifTitle = grp?.name ?? 'Group';
+            const notifDesc = `${message.sender?.name ?? 'Someone'}: ${body}`;
+            // Insert in-app notification row (non-blocking)
+            prisma.notification.create({
+              data: {
+                user_id: m.user_id,
+                type: 'group_message',
+                title: notifTitle,
+                description: notifDesc,
+              },
+            }).catch(() => {});
             if (m.user?.push_token) {
-              const isCard = message.message_type === 'card' || (() => { try { const p = JSON.parse(content); return !!(p?.full_name || p?.company_name); } catch { return false; } })();
-              const body = isCard ? 'Sent a business card' : content.length > 60 ? content.slice(0, 60) + '...' : content;
-              sendExpoPushNotification(m.user.push_token, grp?.name ?? 'Group', `${message.sender?.name ?? 'Someone'}: ${body}`, { screen: 'GroupChat', groupId, groupName: grp?.name });
+              sendExpoPushNotification(m.user.push_token, notifTitle, notifDesc, { screen: 'GroupChat', groupId, groupName: grp?.name });
             }
           }
         } else {
@@ -149,11 +160,22 @@ export function initSocketService(io: Server) {
               chatId: chat.id,
               message: formatMsg(message),
             });
-            // FCM push for DM when app is closed
+            // In-app notification + push for DM when app is closed
             try {
+              const dmBody = content.length > 60 ? content.slice(0, 60) + '...' : content;
+              const dmTitle = message.sender?.name ?? 'New Message';
               const recipient = await prisma.user.findUnique({ where: { id: receiverId }, select: { push_token: true } });
+              // Insert in-app notification row
+              prisma.notification.create({
+                data: {
+                  user_id: receiverId,
+                  type: 'chat_message',
+                  title: dmTitle,
+                  description: dmBody,
+                },
+              }).catch(() => {});
               if (recipient?.push_token) {
-                sendExpoPushNotification(recipient.push_token, message.sender?.name ?? 'New Message', content.length > 60 ? content.slice(0, 60) + '...' : content, { screen: 'Chat', chatId: chat.id });
+                sendExpoPushNotification(recipient.push_token, dmTitle, dmBody, { screen: 'Chat', chatId: chat.id });
               }
             } catch { /* non-blocking */ }
           }

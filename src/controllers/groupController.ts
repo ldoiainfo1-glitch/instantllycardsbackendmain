@@ -108,7 +108,8 @@ export async function createGroup(req: AuthRequest, res: Response) {
 export async function joinGroup(req: AuthRequest, res: Response) {
   try {
     const userId = req.user!.userId;
-    const { joinCode } = req.body;
+    const { joinCode, source } = req.body;
+    const joinedViaLink = source === 'invite_link';
     if (!joinCode) return res.status(400).json({ error: 'joinCode required' });
 
     const group = await prisma.group.findUnique({
@@ -142,6 +143,29 @@ export async function joinGroup(req: AuthRequest, res: Response) {
     const joiner = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
     const joinerName = joiner?.name ?? 'Someone';
 
+    if (joinedViaLink) {
+      const systemContent = `${joinerName} joined via invite link.`;
+      const systemMessage = await prisma.message.create({
+        data: {
+          sender_id: userId,
+          group_id: group.id,
+          content: systemContent,
+          message_type: 'text',
+          metadata: {
+            systemEvent: 'group_join_via_link',
+            source: 'invite_link',
+            joinerId: userId,
+            joinerName,
+          },
+        },
+      });
+
+      await prisma.group.update({
+        where: { id: group.id },
+        data: { last_message_id: systemMessage.id, last_message_time: systemMessage.created_at },
+      });
+    }
+
     // Notify all existing members (socket + FCM) and the joiner (socket + FCM)
     try {
       const io = getIO();
@@ -153,15 +177,19 @@ export async function joinGroup(req: AuthRequest, res: Response) {
       for (const m of allMembers) {
         const isJoiner = m.user_id === userId;
         const title = isJoiner ? `Welcome to ${group.name}! 🎉` : `${group.name}`;
+        const joinedText = joinedViaLink
+          ? `${joinerName} joined via invite link.`
+          : `${joinerName} joined the group.`;
         const body = isJoiner
           ? `You've joined "${group.name}". Say hello to the group!`
-          : `${joinerName} joined the group.`;
+          : joinedText;
         const payload = {
           groupId: group.id,
           groupName: group.name,
           joinerId: userId,
           joinerName,
           isJoiner,
+          joinedViaLink,
         };
 
         // Real-time socket event
@@ -248,6 +276,22 @@ export async function getGroupMessages(req: AuthRequest, res: Response) {
       where: { group_id_user_id: { group_id: groupId, user_id: userId } },
     });
     if (!membership) return res.status(403).json({ error: 'Not a member' });
+
+    // Mark messages as read when any member opens/fetches the group chat.
+    // Current schema has a single read flag per message, so this indicates
+    // that at least one recipient has seen the message.
+    await prisma.message.updateMany({
+      where: {
+        group_id: groupId,
+        sender_id: { not: userId },
+        is_read: false,
+        is_deleted: false,
+      },
+      data: {
+        is_read: true,
+        read_at: new Date(),
+      },
+    });
 
     const messages = await prisma.message.findMany({
       where: { group_id: groupId, is_deleted: false },
