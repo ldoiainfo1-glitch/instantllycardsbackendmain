@@ -199,10 +199,10 @@ async function processReferralReward(referrerId: number, newUserId: number): Pro
     const newUserNewBalance = Number(newUser.credits ?? 0) + rewardAmount;
 
     await prisma.$transaction(async (tx) => {
-      // Award credits to referrer
+      // Award credits to referrer (clear expiry so old expired dates don't zero out new credits)
       await tx.user.update({
         where: { id: referrerId },
-        data: { credits: BigInt(referrerNewBalance) },
+        data: { credits: BigInt(referrerNewBalance), credits_expiry_date: null },
       });
 
       await tx.transaction.create({
@@ -211,7 +211,7 @@ async function processReferralReward(referrerId: number, newUserId: number): Pro
           to_user_id: referrerId,
           from_user_id: newUserId,
           amount: rewardAmount,
-          description: `Referral bonus: new user signed up with your code`,
+          description: `Referral bonus: ${newUser.name ?? newUser.phone ?? 'A friend'} joined using your code`,
           status: 'completed',
           balance_after: referrerNewBalance,
         },

@@ -70,7 +70,7 @@ router.get('/balance', (async (req: AuthRequest, res: Response): Promise<void> =
     if (user.credits_expiry_date && user.credits_expiry_date < now) {
       await prisma.user.update({
         where: { id: req.user!.userId },
-        data: { credits: BigInt(0) },
+        data: { credits: BigInt(0), credits_expiry_date: null },
       });
       res.json({ credits: 0, creditsExpiryDate: user.credits_expiry_date, expired: true });
       return;
@@ -412,9 +412,9 @@ router.get('/referral-history', (async (req: AuthRequest, res: Response) => {
         const bonusTx = await prisma.transaction.findFirst({
           where: {
             to_user_id: userId,
+            from_user_id: r.referred_id,
             type: 'referral_bonus',
             status: 'completed',
-            description: { contains: String(r.referred_id) },
           },
           select: { amount: true },
         });
