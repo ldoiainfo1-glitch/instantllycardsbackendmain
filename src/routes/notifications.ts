@@ -1,6 +1,7 @@
 import { Router, Response, RequestHandler } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import prisma from '../prismaClient';
+import { paramInt } from '../utils/params';
 
 const router = Router();
 const h = (fn: Function) => fn as RequestHandler;
@@ -38,7 +39,7 @@ router.get('/', authenticate, h(async (req: AuthRequest, res: Response) => {
 router.patch('/:id/read', authenticate, h(async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const id = parseInt(req.params.id, 10);
+    const id = paramInt(req.params.id);
     if (Number.isNaN(id)) { res.status(400).json({ error: 'Invalid id' }); return; }
     await prisma.notification.updateMany({
       where: { id, user_id: userId },

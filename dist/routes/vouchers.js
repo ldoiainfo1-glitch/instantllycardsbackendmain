@@ -13,7 +13,7 @@ router.get('/created', auth_1.authenticate, (0, auth_1.requireRole)('business', 
 router.get('/transfers', auth_1.authenticate, h(voucherController_1.getMyTransfers));
 router.get('/:id', h(voucherController_1.getVoucher));
 router.post('/', auth_1.authenticate, (0, auth_1.requireRole)('business', 'admin'), [
-    (0, express_validator_1.body)('business_id').isInt(),
+    (0, express_validator_1.body)('business_promotion_id').isInt(),
     (0, express_validator_1.body)('title').notEmpty(),
     (0, express_validator_1.body)('discount_value').notEmpty(),
 ], validate_1.validate, h(voucherController_1.createVoucher));

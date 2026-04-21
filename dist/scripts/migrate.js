@@ -1022,9 +1022,20 @@ const migrateVouchers = async (db, collections, options) => {
         const originalOwnerId = getMappedId(userIdMap, idToString(doc.originalOwner));
         const createdByAdmin = getMappedId(userIdMap, idToString(doc.createdByAdmin));
         const transferredFrom = getMappedId(userIdMap, idToString(doc.transferredFrom));
+        const promotionLegacyId = idToString(doc.businessPromotionId || doc.promotionId || doc.businessPromotion || doc.promotion || doc.businessId);
+        const businessPromotionId = getMappedId(promotionIdMap, promotionLegacyId);
+        if (!businessPromotionId) {
+            auditLog("voucher_missing_promotion", {
+                voucher_id: legacyId,
+                promotion_legacy_id: promotionLegacyId,
+                business_id_legacy: idToString(doc.businessId),
+            });
+            continue;
+        }
         const data = {
             legacy_id: legacyId ?? undefined,
             business_id: getMappedId(cardIdMap, idToString(doc.businessId)),
+            business_promotion_id: businessPromotionId,
             business_name: doc.businessName || doc.companyName || "Instantlly",
             title: doc.title || doc.voucherNumber || "Voucher",
             description: doc.description || undefined,

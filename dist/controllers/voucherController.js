@@ -41,18 +41,18 @@ async function getVoucher(req, res) {
     res.json(voucher);
 }
 async function createVoucher(req, res) {
-    const { business_id, title, description, discount_type, discount_value, code, max_claims, expires_at, } = req.body;
-    const businessId = parseInt(business_id, 10);
-    if (!businessId || !title) {
-        res.status(400).json({ error: 'business_id and title are required' });
+    const { business_promotion_id, title, description, discount_type, discount_value, code, max_claims, expires_at, } = req.body;
+    const promotionId = parseInt(String(business_promotion_id ?? ''), 10);
+    if (!promotionId || !title) {
+        res.status(400).json({ error: 'business_promotion_id and title are required' });
         return;
     }
-    const card = await prisma_1.default.businessCard.findUnique({ where: { id: businessId } });
-    if (!card) {
-        res.status(404).json({ error: 'Business card not found' });
+    const promotion = await prisma_1.default.businessPromotion.findUnique({ where: { id: promotionId } });
+    if (!promotion) {
+        res.status(404).json({ error: 'Business promotion not found' });
         return;
     }
-    if (card.user_id !== req.user.userId && !req.user.roles.includes('admin')) {
+    if (promotion.user_id !== req.user.userId && !req.user.roles.includes('admin')) {
         res.status(403).json({ error: 'Forbidden' });
         return;
     }
@@ -63,8 +63,9 @@ async function createVoucher(req, res) {
     }
     const voucher = await prisma_1.default.voucher.create({
         data: {
-            business_id: card.id,
-            business_name: card.company_name || card.full_name,
+            business_id: promotion.business_card_id ?? undefined,
+            business_promotion_id: promotion.id,
+            business_name: promotion.business_name,
             title,
             description: description || null,
             discount_type: discount_type || 'flat',

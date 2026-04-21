@@ -27,6 +27,7 @@ const scheduler_1 = require("./jobs/scheduler");
 const chats_1 = __importDefault(require("./routes/chats"));
 const groups_1 = __importDefault(require("./routes/groups"));
 const messages_1 = __importDefault(require("./routes/messages"));
+const notifications_1 = __importDefault(require("./routes/notifications"));
 const socketService_1 = require("./services/socketService");
 const app = (0, express_1.default)();
 const httpServer = (0, http_1.createServer)(app);
@@ -127,6 +128,7 @@ app.use('/api/credits', credits_1.default);
 app.use('/api/chats', chats_1.default);
 app.use('/api/groups', groups_1.default);
 app.use('/api/messages', messages_1.default);
+app.use('/api/notifications', notifications_1.default);
 // Socket.IO — real-time chat with auth
 (0, socketService_1.initSocketService)(io);
 const PORT = process.env.PORT || 8080;

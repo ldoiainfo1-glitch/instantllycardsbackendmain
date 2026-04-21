@@ -26,7 +26,7 @@ router.post(
   authenticate,
   requireRole('business', 'admin'),
   [
-    body('business_id').isInt(),
+    body('business_promotion_id').isInt(),
     body('title').notEmpty(),
     body('discount_value').notEmpty(),
   ],

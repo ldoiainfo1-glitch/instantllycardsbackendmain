@@ -1044,10 +1044,24 @@ const migrateVouchers = async (db: any, collections: Set<string>, options: Migra
     const originalOwnerId = getMappedId(userIdMap, idToString(doc.originalOwner));
     const createdByAdmin = getMappedId(userIdMap, idToString(doc.createdByAdmin));
     const transferredFrom = getMappedId(userIdMap, idToString(doc.transferredFrom));
+    const promotionLegacyId = idToString(
+      doc.businessPromotionId || doc.promotionId || doc.businessPromotion || doc.promotion || doc.businessId
+    );
+    const businessPromotionId = getMappedId(promotionIdMap, promotionLegacyId);
 
-    const data = {
+    if (!businessPromotionId) {
+      auditLog("voucher_missing_promotion", {
+        voucher_id: legacyId,
+        promotion_legacy_id: promotionLegacyId,
+        business_id_legacy: idToString(doc.businessId),
+      });
+      continue;
+    }
+
+    const data: Prisma.VoucherUncheckedCreateInput = {
       legacy_id: legacyId ?? undefined,
       business_id: getMappedId(cardIdMap, idToString(doc.businessId)),
+      business_promotion_id: businessPromotionId,
       business_name: doc.businessName || doc.companyName || "Instantlly",
       title: doc.title || doc.voucherNumber || "Voucher",
       description: doc.description || undefined,
@@ -1088,7 +1102,7 @@ const migrateVouchers = async (db: any, collections: Set<string>, options: Migra
       source: doc.source || undefined,
       transferred_from_id: transferredFrom,
       transferred_at: toDate(doc.transferredAt),
-    } as const;
+    };
 
     if (options.dryRun) {
       count += 1;
