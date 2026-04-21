@@ -250,6 +250,7 @@ model Voucher {
   id                    Int                  @id @default(autoincrement())
   legacy_id             String?              @unique
   business_id           Int?
+  business_promotion_id Int
   business_name         String
   title                 String
   description           String?
@@ -295,6 +296,7 @@ model Voucher {
   promotion_orders      PromotionOrder[]     @relation("VoucherPromotionOrders")
   special_credits       SpecialCredit[]      @relation("VoucherSpecialCredits")
   business              BusinessCard?        @relation(fields: [business_id], references: [id])
+  business_promotion    BusinessPromotion    @relation(fields: [business_promotion_id], references: [id])
   created_by_admin      User?                @relation("VoucherAdmin", fields: [created_by_admin_id], references: [id])
   original_owner        User?                @relation("VoucherOriginalOwner", fields: [original_owner_id], references: [id])
   owner_user            User?                @relation("VoucherOwner", fields: [owner_user_id], references: [id])
@@ -307,6 +309,8 @@ model Voucher {
   voucher_transfer_logs VoucherTransferLog[]
 
   @@index([business_id])
+  @@index([business_promotion_id])
+  @@index([business_promotion_id, status])
   @@index([status])
   @@index([expires_at])
 }
@@ -318,8 +322,13 @@ model VoucherClaim {
   user_id     Int
   claimed_at  DateTime  @default(now())
   redeemed_at DateTime?
+  status      String    @default("active")
   user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
   voucher     Voucher   @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, voucher_id])
+  @@index([voucher_id, status])
+  @@index([voucher_id, user_id, status])
 }
 
 model VoucherTransfer {
@@ -968,6 +977,7 @@ model BusinessPromotion {
   user                       User             @relation("BusinessPromotionUser", fields: [user_id], references: [id], onDelete: Cascade)
   enquiries                  Enquiry[]        @relation("BusinessPromotionEnquiries")
   promotion_orders           PromotionOrder[] @relation("BusinessPromotionOrders")
+  vouchers                   Voucher[]
 
   @@index([user_id])
   @@index([business_card_id])
@@ -1395,6 +1405,8 @@ model VoucherRedemption {
   used_by_id Int?
   used_by    User?    @relation("VoucherRedemptionUser", fields: [used_by_id], references: [id])
   voucher    Voucher  @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
+
+  @@unique([voucher_id, used_by_id])
 }
 
 model VoucherTransferLog {

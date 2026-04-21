@@ -8,3 +8,5 @@ export declare function transferVoucher(req: AuthRequest, res: Response): Promis
 export declare function getMyVouchers(req: AuthRequest, res: Response): Promise<void>;
 export declare function getMyCreatedVouchers(req: AuthRequest, res: Response): Promise<void>;
 export declare function getMyTransfers(req: AuthRequest, res: Response): Promise<void>;
+export declare function updateVoucherStatus(req: AuthRequest, res: Response): Promise<void>;
+export declare function redeemVoucher(req: AuthRequest, res: Response): Promise<void>;

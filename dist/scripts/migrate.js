@@ -1022,9 +1022,28 @@ const migrateVouchers = async (db, collections, options) => {
         const originalOwnerId = getMappedId(userIdMap, idToString(doc.originalOwner));
         const createdByAdmin = getMappedId(userIdMap, idToString(doc.createdByAdmin));
         const transferredFrom = getMappedId(userIdMap, idToString(doc.transferredFrom));
+        const mappedBusinessId = getMappedId(cardIdMap, idToString(doc.businessId));
+        let mappedPromotionId = getMappedId(promotionIdMap, idToString(doc.businessPromotionId || doc.promotionId || doc.businessPromotion || doc.promotion));
+        if (!mappedPromotionId && mappedBusinessId) {
+            const promo = await prisma.businessPromotion.findFirst({
+                where: { business_card_id: mappedBusinessId },
+                orderBy: { created_at: 'desc' },
+                select: { id: true },
+            });
+            mappedPromotionId = promo?.id;
+        }
+        if (!mappedPromotionId) {
+            auditLog('voucher_missing_promotion', {
+                legacy_id: legacyId,
+                missing_business_id: mappedBusinessId ?? null,
+            });
+            log.warn(`Voucher ${legacyId} missing mapped business promotion. Skipping.`);
+            continue;
+        }
         const data = {
             legacy_id: legacyId ?? undefined,
-            business_id: getMappedId(cardIdMap, idToString(doc.businessId)),
+            business_id: mappedBusinessId,
+            business_promotion_id: mappedPromotionId,
             business_name: doc.businessName || doc.companyName || "Instantlly",
             title: doc.title || doc.voucherNumber || "Voucher",
             description: doc.description || undefined,

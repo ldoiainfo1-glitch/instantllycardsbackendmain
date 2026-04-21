@@ -23,6 +23,7 @@ let tokenA;
 let tokenB;
 let voucherId;
 let cardId;
+let promotionId;
 beforeAll(async () => {
     const [rA, rB] = await Promise.all([
         (0, supertest_1.default)(app).post('/api/auth/signup').send({ phone: PHONE_A, password: 'Test@1234' }),
@@ -36,10 +37,28 @@ beforeAll(async () => {
         .set('Authorization', `Bearer ${tokenA}`)
         .send({ full_name: 'Voucher Business', company_name: 'Voucher Co' });
     cardId = cardRes.body.id;
+    const userA = await prisma_1.default.user.findUnique({
+        where: { phone: PHONE_A },
+        select: { id: true },
+    });
+    if (!userA)
+        throw new Error('User A not found');
+    const promotion = await prisma_1.default.businessPromotion.create({
+        data: {
+            user_id: userA.id,
+            business_card_id: cardId,
+            business_name: 'Voucher Co',
+            owner_name: 'Voucher Owner',
+            status: 'active',
+            payment_status: 'completed',
+            tier: 'boost',
+        },
+    });
+    promotionId = promotion.id;
     // Seed a voucher directly
     const v = await prisma_1.default.voucher.create({
         data: {
-            business_id: cardId,
+            business_promotion_id: promotionId,
             business_name: 'Voucher Co',
             title: 'Test Voucher',
             discount_type: 'percentage',

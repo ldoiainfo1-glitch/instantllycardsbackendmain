@@ -3,6 +3,7 @@ import { AuthRequest } from './auth';
 import prisma from '../utils/prisma';
 import { hasFeature, type Feature } from '../utils/tierFeatures';
 
+<<<<<<< Updated upstream
 /**
  * Middleware factory: require a specific tier feature.
  *
@@ -19,24 +20,60 @@ import { hasFeature, type Feature } from '../utils/tierFeatures';
 export function requireFeature(feature: Feature) {
   return async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
     if (!req.user) {
+=======
+type PromotionIdSource = 'query' | 'body' | 'params';
+
+interface RequireFeatureOptions {
+  requirePromotionId?: boolean;
+  promotionIdField?: string;
+  promotionIdSource?: PromotionIdSource;
+}
+
+function readPromotionId(req: Request, options?: RequireFeatureOptions): number | null {
+  const source = options?.promotionIdSource ?? 'query';
+  const field = options?.promotionIdField ?? 'promotionId';
+  const container = source === 'query' ? req.query : source === 'params' ? req.params : (req as any).body;
+  const raw = container?.[field];
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = parseInt(String(raw), 10);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+export function requireFeature(feature: Feature, options?: RequireFeatureOptions): RequestHandler {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const authReq = req as AuthRequest;
+    if (!authReq.user) {
+>>>>>>> Stashed changes
       res.status(401).json({ error: 'Unauthenticated' });
       return;
     }
 
-    const promotionId = req.query.promotionId
-      ? parseInt(req.query.promotionId as string, 10)
-      : null;
+    const promotionId = readPromotionId(req, options);
+    const resolvedPromotionId = promotionId;
+
+    if (options?.requirePromotionId && !resolvedPromotionId) {
+      res.status(400).json({ error: 'promotionId is required for this feature check' });
+      return;
+    }
 
     console.log(`[requireFeature] START feature=${feature} userId=${req.user.userId} promotionId=${promotionId}`);
 
     let tier: string;
 
+<<<<<<< Updated upstream
     if (promotionId) {
       // Promotion-scoped: validate ownership and use this promotion's tier
       const promo = await prisma.businessPromotion.findFirst({
         where: {
           id: promotionId,
           user_id: req.user.userId,
+=======
+    if (resolvedPromotionId) {
+      const promo = await prisma.businessPromotion.findFirst({
+        where: {
+          id: resolvedPromotionId,
+          user_id: authReq.user!.userId,
+>>>>>>> Stashed changes
         },
         select: { tier: true, status: true },
       });
