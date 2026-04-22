@@ -40,13 +40,9 @@ router.post(
   validate,
   createVoucher
 );
-<<<<<<< Updated upstream
 router.post('/:id/claim', authenticate, claimVoucher);
-=======
-router.post('/:id/claim', authenticate, h(claimVoucher));
-router.patch('/:id/status', authenticate, [body('status').notEmpty()], validate, h(updateVoucherStatus));
-router.post('/redeem', authenticate, [body('voucher_id').isInt()], validate, h(redeemVoucher));
->>>>>>> Stashed changes
+router.patch('/:id/status', authenticate, [body('status').notEmpty()], validate, updateVoucherStatus);
+router.post('/redeem', authenticate, [body('voucher_id').isInt()], validate, redeemVoucher);
 router.post(
   '/transfer',
   authenticate,

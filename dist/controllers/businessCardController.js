@@ -240,6 +240,18 @@ async function shareCard(req, res) {
         const recipient = recipient_user_id
             ? await prisma_1.default.user.findUnique({ where: { id: parseInt(recipient_user_id) } })
             : null;
+        // Prevent duplicate shares of the same card to the same recipient
+        const existing = await prisma_1.default.sharedCard.findFirst({
+            where: {
+                card_id: card.id,
+                sender_id: String(sender.id),
+                recipient_id: recipient ? String(recipient.id) : '0',
+            },
+        });
+        if (existing) {
+            res.status(200).json({ ...existing, alreadyShared: true });
+            return;
+        }
         const share = await prisma_1.default.sharedCard.create({
             data: {
                 card_id: card.id,

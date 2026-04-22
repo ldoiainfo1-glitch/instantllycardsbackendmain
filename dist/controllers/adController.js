@@ -23,7 +23,7 @@ const urlNormalizer_1 = require("../utils/urlNormalizer");
 const CAMPAIGN_FIELDS = [
     'title', 'description', 'ad_type', 'cta', 'creative_url', 'creative_urls',
     'target_city', 'target_age', 'target_interests', 'daily_budget',
-    'duration_days', 'business_card_id',
+    'duration_days', 'business_card_id', 'promotion_id',
 ];
 function pickCampaignFields(body) {
     const out = {};
@@ -297,6 +297,32 @@ async function createCampaign(req, res) {
         const totalBudget = dailyBudget * durationDays;
         const endDate = new Date();
         endDate.setDate(endDate.getDate() + durationDays);
+        // Promotion-first campaign linkage: resolve business card via promotion mapping.
+        let resolvedBusinessCardId = null;
+        if (fields.promotion_id !== undefined && fields.promotion_id !== null && fields.promotion_id !== '') {
+            const promotionId = parseInt(String(fields.promotion_id), 10);
+            if (Number.isNaN(promotionId)) {
+                res.status(422).json({ error: 'promotion_id must be a valid number' });
+                return;
+            }
+            const promo = await prisma_1.default.businessPromotion.findFirst({
+                where: { id: promotionId, user_id: req.user.userId },
+                select: { id: true, business_card_id: true, status: true },
+            });
+            if (!promo) {
+                res.status(404).json({ error: 'Promotion not found' });
+                return;
+            }
+            if (!promo.business_card_id) {
+                res.status(422).json({ error: 'Selected promotion has no linked business profile' });
+                return;
+            }
+            resolvedBusinessCardId = promo.business_card_id;
+        }
+        if (!resolvedBusinessCardId && fields.business_card_id) {
+            const parsed = parseInt(String(fields.business_card_id), 10);
+            resolvedBusinessCardId = Number.isNaN(parsed) ? null : parsed;
+        }
         const campaign = await prisma_1.default.adCampaign.create({
             data: {
                 user_id: req.user.userId,
@@ -312,7 +338,7 @@ async function createCampaign(req, res) {
                 daily_budget: dailyBudget,
                 duration_days: durationDays,
                 total_budget: totalBudget,
-                business_card_id: fields.business_card_id ? parseInt(String(fields.business_card_id), 10) : null,
+                business_card_id: resolvedBusinessCardId,
                 end_date: endDate,
                 status: 'active',
                 approval_status: 'pending',

@@ -12,7 +12,7 @@ router.get('/registrations/my', auth_1.authenticate, eventController_1.getMyRegi
 router.get('/:id', eventController_1.getEvent);
 router.get('/:id/registrations', auth_1.authenticate, eventController_1.getEventRegistrations);
 router.post('/', auth_1.authenticate, (0, auth_1.requireRole)('business', 'admin'), [
-    (0, express_validator_1.body)('business_id').notEmpty().toInt(),
+    (0, express_validator_1.body)('business_promotion_id').notEmpty().toInt(),
     (0, express_validator_1.body)('title').notEmpty(),
     (0, express_validator_1.body)('date').notEmpty(),
     (0, express_validator_1.body)('time').notEmpty(),

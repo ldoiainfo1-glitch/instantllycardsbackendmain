@@ -7,6 +7,7 @@ exports.listPromotions = listPromotions;
 exports.getPromotion = getPromotion;
 exports.createPromotion = createPromotion;
 exports.updatePromotion = updatePromotion;
+exports.deletePromotion = deletePromotion;
 exports.getMyPromotions = getMyPromotions;
 exports.listPricingPlans = listPricingPlans;
 exports.createPromotionPaymentIntent = createPromotionPaymentIntent;
@@ -429,12 +430,25 @@ async function createPromotion(req, res) {
 }
 async function updatePromotion(req, res) {
     const id = (0, params_1.paramInt)(req.params.id);
+    console.log('[PromotionController][updatePromotion] request', {
+        id,
+        userId: req.user?.userId,
+        roles: req.user?.roles,
+        bodyKeys: Object.keys(req.body || {}),
+        requestedStatus: req.body?.status,
+    });
     const promo = await prisma_1.default.businessPromotion.findUnique({ where: { id } });
     if (!promo) {
+        console.log('[PromotionController][updatePromotion] not-found', { id });
         res.status(404).json({ error: 'Not found' });
         return;
     }
     if (promo.user_id !== req.user.userId && !req.user.roles.includes('admin')) {
+        console.log('[PromotionController][updatePromotion] forbidden', {
+            id,
+            ownerUserId: promo.user_id,
+            requesterUserId: req.user.userId,
+        });
         res.status(403).json({ error: 'Forbidden' });
         return;
     }
@@ -449,6 +463,20 @@ async function updatePromotion(req, res) {
         if (req.body[key] !== undefined)
             data[key] = req.body[key];
     }
+    if (req.body.status !== undefined) {
+        const nextStatus = String(req.body.status);
+        const allowedStatuses = ['draft', 'active', 'pending_payment', 'expired', 'cancelled'];
+        if (!allowedStatuses.includes(nextStatus)) {
+            console.log('[PromotionController][updatePromotion] invalid-status', {
+                id,
+                nextStatus,
+                allowedStatuses,
+            });
+            res.status(400).json({ error: `status must be one of: ${allowedStatuses.join(', ')}` });
+            return;
+        }
+        data.status = nextStatus;
+    }
     // Normalize category through tree resolution if it was updated
     if (data.category !== undefined) {
         const rawCats = Array.isArray(data.category)
@@ -459,8 +487,68 @@ async function updatePromotion(req, res) {
         const resolvedSets = await Promise.all(rawCats.map(c => buildCategoryMatchSet(c)));
         data.category = [...new Set(resolvedSets.flat())];
     }
-    const updated = await prisma_1.default.businessPromotion.update({ where: { id }, data });
-    res.json(updated);
+    try {
+        console.log('[PromotionController][updatePromotion] applying-update', {
+            id,
+            data,
+        });
+        const updated = await prisma_1.default.businessPromotion.update({ where: { id }, data });
+        console.log('[PromotionController][updatePromotion] success', {
+            id,
+            previousStatus: promo.status,
+            updatedStatus: updated.status,
+        });
+        res.json(updated);
+    }
+    catch (error) {
+        console.error('[PromotionController][updatePromotion] failed', {
+            id,
+            data,
+            message: error?.message,
+            code: error?.code,
+        });
+        res.status(500).json({ error: 'Failed to update promotion' });
+    }
+}
+async function deletePromotion(req, res) {
+    const id = (0, params_1.paramInt)(req.params.id);
+    console.log('[PromotionController][deletePromotion] request', {
+        id,
+        userId: req.user?.userId,
+        roles: req.user?.roles,
+    });
+    const promo = await prisma_1.default.businessPromotion.findUnique({ where: { id } });
+    if (!promo) {
+        console.log('[PromotionController][deletePromotion] not-found', { id });
+        res.status(404).json({ error: 'Not found' });
+        return;
+    }
+    if (promo.user_id !== req.user.userId && !req.user.roles.includes('admin')) {
+        console.log('[PromotionController][deletePromotion] forbidden', {
+            id,
+            ownerUserId: promo.user_id,
+            requesterUserId: req.user.userId,
+        });
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+    }
+    try {
+        await prisma_1.default.businessPromotion.delete({ where: { id } });
+        console.log('[PromotionController][deletePromotion] success', { id });
+        res.json({ success: true, id });
+    }
+    catch (error) {
+        console.error('[PromotionController][deletePromotion] failed', {
+            id,
+            message: error?.message,
+            code: error?.code,
+        });
+        if (error?.code === 'P2003') {
+            res.status(409).json({ error: 'Promotion has related data and cannot be deleted permanently' });
+            return;
+        }
+        res.status(500).json({ error: 'Failed to delete promotion permanently' });
+    }
 }
 async function getMyPromotions(req, res) {
     const promotions = await prisma_1.default.businessPromotion.findMany({

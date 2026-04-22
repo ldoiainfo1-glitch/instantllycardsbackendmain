@@ -17,10 +17,6 @@ const client_1 = require("@prisma/client");
 const prisma_1 = __importDefault(require("../utils/prisma"));
 const params_1 = require("../utils/params");
 const phone_1 = require("../utils/phone");
-<<<<<<< Updated upstream
-=======
-const socketService_1 = require("../services/socketService");
-const push_1 = require("../utils/push");
 function parseOptionalInt(value) {
     if (value === undefined || value === null || value === '')
         return null;
@@ -30,7 +26,6 @@ function parseOptionalInt(value) {
 function getVoucherExpiry(voucher) {
     return voucher.expiry_date ?? voucher.expires_at ?? null;
 }
->>>>>>> Stashed changes
 async function listVouchers(req, res) {
     const page = (0, params_1.queryInt)(req.query.page, 1);
     const limit = (0, params_1.queryInt)(req.query.limit, 20);
@@ -158,13 +153,6 @@ async function claimVoucher(req, res) {
         res.status(409).json({ error: 'Already claimed' });
         return;
     }
-<<<<<<< Updated upstream
-    const [claim] = await prisma_1.default.$transaction([
-        prisma_1.default.voucherClaim.create({ data: { voucher_id: id, user_id: req.user.userId } }),
-        prisma_1.default.voucher.update({ where: { id }, data: { claimed_count: { increment: 1 } } }),
-    ]);
-    res.status(201).json(claim);
-=======
     const existingUserClaim = await prisma_1.default.voucherClaim.findFirst({
         where: { voucher_id: id, user_id: req.user.userId },
         select: { id: true },
@@ -187,30 +175,12 @@ async function claimVoucher(req, res) {
         }
         throw err;
     }
-    // Notify voucher creator
-    try {
-        if (voucher.owner_user_id && voucher.owner_user_id !== req.user.userId) {
-            const owner = await prisma_1.default.user.findUnique({ where: { id: voucher.owner_user_id }, select: { id: true, push_token: true } });
-            const claimer = await prisma_1.default.user.findUnique({ where: { id: req.user.userId }, select: { name: true } });
-            if (owner) {
-                const io = (0, socketService_1.getIO)();
-                const payload = { type: 'voucher:claimed', voucherId: id, voucherTitle: voucher.title, claimerName: claimer?.name ?? 'Someone' };
-                if (io)
-                    io.to(`user:${owner.id}`).emit('voucher:claimed', payload);
-                if (owner.push_token) {
-                    (0, push_1.sendExpoPushNotification)(owner.push_token, 'Voucher Claimed', `${claimer?.name ?? 'Someone'} claimed your voucher "${voucher.title}"`, { screen: 'Vouchers' });
-                }
-            }
-        }
-    }
-    catch { /* non-blocking */ }
     res.status(201).json({
         id: claim.id,
         voucher_id: claim.voucher_id,
         claimed_at: claim.claimed_at,
         status: claim.status,
     });
->>>>>>> Stashed changes
 }
 async function transferVoucher(req, res) {
     const { voucher_id, recipient_phone } = req.body;
@@ -246,17 +216,6 @@ async function transferVoucher(req, res) {
     }
     const sender = await prisma_1.default.user.findUnique({ where: { id: req.user.userId } });
     const normalizedRecipientPhone = (0, phone_1.normalizePhone)(recipient_phone);
-<<<<<<< Updated upstream
-    const transfer = await prisma_1.default.voucherTransfer.create({
-        data: {
-            voucher_id: vId,
-            sender_id: req.user.userId,
-            recipient_id: recipient.id,
-            sender_phone: sender.phone,
-            recipient_phone: normalizedRecipientPhone,
-        },
-    });
-=======
     let transfer;
     try {
         transfer = await prisma_1.default.$transaction(async (tx) => {
@@ -318,21 +277,6 @@ async function transferVoucher(req, res) {
         }
         throw err;
     }
-    // Notify recipient about the voucher transfer
-    try {
-        const recipientUser = await prisma_1.default.user.findUnique({ where: { id: recipient.id }, select: { id: true, push_token: true } });
-        if (recipientUser) {
-            const io = (0, socketService_1.getIO)();
-            const payload = { type: 'voucher:transferred', transferId: transfer.id, voucherId: vId, voucherTitle: voucher.title, senderName: sender?.name ?? 'Someone' };
-            if (io)
-                io.to(`user:${recipientUser.id}`).emit('voucher:transferred', payload);
-            if (recipientUser.push_token) {
-                (0, push_1.sendExpoPushNotification)(recipientUser.push_token, 'Voucher Received', `${sender?.name ?? 'Someone'} transferred a voucher "${voucher.title}" to you`, { screen: 'Vouchers' });
-            }
-        }
-    }
-    catch { /* non-blocking */ }
->>>>>>> Stashed changes
     res.status(201).json(transfer);
 }
 async function getMyVouchers(req, res) {

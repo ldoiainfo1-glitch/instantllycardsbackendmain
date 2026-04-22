@@ -11,6 +11,7 @@ router.get('/my', auth_1.authenticate, promotionController_1.getMyPromotions);
 router.post('/', auth_1.authenticate, promotionController_1.createPromotion);
 router.get('/:id', promotionController_1.getPromotion);
 router.put('/:id', auth_1.authenticate, promotionController_1.updatePromotion);
+router.delete('/:id', auth_1.authenticate, promotionController_1.deletePromotion);
 router.post('/:id/payment-intent', auth_1.authenticate, promotionController_1.createPromotionPaymentIntent);
 router.post('/:id/verify-payment', auth_1.authenticate, promotionController_1.verifyPromotionPayment);
 router.post('/:id/retry-payment', auth_1.authenticate, promotionController_1.retryPromotionPayment);

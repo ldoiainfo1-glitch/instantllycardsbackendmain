@@ -4,6 +4,7 @@ export declare function listPromotions(req: Request, res: Response): Promise<voi
 export declare function getPromotion(req: Request, res: Response): Promise<void>;
 export declare function createPromotion(req: AuthRequest, res: Response): Promise<void>;
 export declare function updatePromotion(req: AuthRequest, res: Response): Promise<void>;
+export declare function deletePromotion(req: AuthRequest, res: Response): Promise<void>;
 export declare function getMyPromotions(req: AuthRequest, res: Response): Promise<void>;
 /**
  * GET /promotions/pricing-plans

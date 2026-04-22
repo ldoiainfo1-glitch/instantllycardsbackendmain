@@ -22,6 +22,7 @@ export async function listBusinessBookings(req: AuthRequest, res: Response): Pro
   const page = queryInt(req.query.page, 1);
   const limit = queryInt(req.query.limit, 20);
   const status = req.query.status as string | undefined;
+  const promotionId = queryInt(req.query.promotion_id, 0) || undefined;
 
   const card = await prisma.businessCard.findUnique({ where: { id: businessId } });
   if (!card) { res.status(404).json({ error: 'Business not found' }); return; }
@@ -29,7 +30,36 @@ export async function listBusinessBookings(req: AuthRequest, res: Response): Pro
     res.status(403).json({ error: 'Forbidden' }); return;
   }
 
-  const where: any = { business_id: businessId };
+  const scope: any[] = [{ business_id: businessId }];
+  if (promotionId) scope.push({ business_promotion_id: promotionId });
+  const where: any = { OR: scope };
+  if (status) where.status = status;
+
+  const bookings = await prisma.booking.findMany({
+    where,
+    skip: (page - 1) * limit,
+    take: limit,
+    orderBy: { created_at: 'desc' },
+    include: { user: { select: { id: true, name: true, phone: true, profile_picture: true } } },
+  });
+  res.json({ data: bookings, page, limit });
+}
+
+export async function listPromotionBookings(req: AuthRequest, res: Response): Promise<void> {
+  const promotionId = paramInt(req.params.promotionId);
+  const page = queryInt(req.query.page, 1);
+  const limit = queryInt(req.query.limit, 20);
+  const status = req.query.status as string | undefined;
+
+  const promotion = await prisma.businessPromotion.findUnique({ where: { id: promotionId } });
+  if (!promotion) { res.status(404).json({ error: 'Promotion not found' }); return; }
+  if (promotion.user_id !== req.user!.userId && !req.user!.roles.includes('admin')) {
+    res.status(403).json({ error: 'Forbidden' }); return;
+  }
+
+  const scope: any[] = [{ business_promotion_id: promotionId }];
+  if (promotion.business_card_id) scope.push({ business_id: promotion.business_card_id });
+  const where: any = { OR: scope };
   if (status) where.status = status;
 
   const bookings = await prisma.booking.findMany({
@@ -47,7 +77,8 @@ export async function getBooking(req: AuthRequest, res: Response): Promise<void>
   const booking = await prisma.booking.findUnique({
     where: { id },
     include: {
-      business: { select: { id: true, company_name: true, logo_url: true, full_name: true, phone: true } },
+      business: { select: { id: true, user_id: true, company_name: true, logo_url: true, full_name: true, phone: true } },
+      business_promotion: { select: { id: true, user_id: true, business_name: true } },
       user: { select: { id: true, name: true, phone: true, profile_picture: true } },
     },
   });
@@ -55,7 +86,7 @@ export async function getBooking(req: AuthRequest, res: Response): Promise<void>
 
   const userId = req.user!.userId;
   const isOwner = booking.user_id === userId;
-  const isBusinessOwner = booking.business.id === booking.business_id;
+  const isBusinessOwner = booking.business?.user_id === userId || booking.business_promotion?.user_id === userId;
   const isAdmin = req.user!.roles.includes('admin');
   if (!isOwner && !isBusinessOwner && !isAdmin) {
     res.status(403).json({ error: 'Forbidden' }); return;
@@ -66,6 +97,7 @@ export async function getBooking(req: AuthRequest, res: Response): Promise<void>
 export async function createBooking(req: AuthRequest, res: Response): Promise<void> {
   const {
     business_id,
+    business_promotion_id,
     business_name,
     mode,
     booking_date,
@@ -75,17 +107,34 @@ export async function createBooking(req: AuthRequest, res: Response): Promise<vo
     notes,
   } = req.body;
 
-  const businessId = parseInt(business_id, 10);
-  if (!businessId) { res.status(400).json({ error: 'business_id is required' }); return; }
+  let resolvedBusinessId: number | null = business_id ? parseInt(business_id, 10) : null;
+  let resolvedPromotionId: number | null = business_promotion_id ? parseInt(business_promotion_id, 10) : null;
+  let resolvedName = business_name as string | undefined;
 
-  const card = await prisma.businessCard.findUnique({ where: { id: businessId } });
-  if (!card) { res.status(404).json({ error: 'Business not found' }); return; }
+  if (!resolvedBusinessId && !resolvedPromotionId) {
+    res.status(400).json({ error: 'business_id or business_promotion_id is required' });
+    return;
+  }
+
+  if (resolvedPromotionId) {
+    const promo = await prisma.businessPromotion.findUnique({ where: { id: resolvedPromotionId } });
+    if (!promo) { res.status(404).json({ error: 'Promotion not found' }); return; }
+    if (!resolvedBusinessId && promo.business_card_id) resolvedBusinessId = promo.business_card_id;
+    if (!resolvedName) resolvedName = promo.business_name;
+  }
+
+  if (resolvedBusinessId) {
+    const card = await prisma.businessCard.findUnique({ where: { id: resolvedBusinessId } });
+    if (!card) { res.status(404).json({ error: 'Business not found' }); return; }
+    if (!resolvedName) resolvedName = card.company_name || card.full_name;
+  }
 
   const booking = await prisma.booking.create({
     data: {
       user_id: req.user!.userId,
-      business_id: businessId,
-      business_name: business_name || card.company_name || card.full_name,
+      business_id: resolvedBusinessId,
+      business_promotion_id: resolvedPromotionId,
+      business_name: resolvedName || 'Business',
       mode: mode || 'visit',
       booking_date: booking_date ? new Date(booking_date) : new Date(),
       booking_time: booking_time || '',
@@ -110,13 +159,13 @@ export async function updateBookingStatus(req: AuthRequest, res: Response): Prom
 
   const booking = await prisma.booking.findUnique({
     where: { id },
-    include: { business: { select: { user_id: true } } },
+    include: { business: { select: { user_id: true } }, business_promotion: { select: { user_id: true } } },
   });
   if (!booking) { res.status(404).json({ error: 'Not found' }); return; }
 
   const userId = req.user!.userId;
   const isCustomer = booking.user_id === userId;
-  const isBusinessOwner = booking.business.user_id === userId;
+  const isBusinessOwner = booking.business?.user_id === userId || booking.business_promotion?.user_id === userId;
   const isAdmin = req.user!.roles.includes('admin');
 
   if (status === 'cancelled' && !isCustomer && !isBusinessOwner && !isAdmin) {

@@ -3,38 +3,32 @@ import { body } from 'express-validator';
 import { validate } from '../middleware/validate';
 import { authenticate } from '../middleware/auth';
 import {
-  listMyBookings,
-  listBusinessBookings,
-  listPromotionBookings,
-  getBooking,
-  createBooking,
-  updateBookingStatus,
-} from '../controllers/bookingController';
+  listBusinessLeads,
+  listPromotionLeads,
+  createLead,
+  updateLeadStatus,
+} from '../controllers/leadController';
 
 const router = Router();
 
-router.get('/my', authenticate, listMyBookings);
-router.get('/business/:businessId', authenticate, listBusinessBookings);
-router.get('/promotion/:promotionId', authenticate, listPromotionBookings);
-router.get('/:id', authenticate, getBooking);
+router.get('/business/:businessId', authenticate, listBusinessLeads);
+router.get('/promotion/:promotionId', authenticate, listPromotionLeads);
 router.post(
   '/',
-  authenticate,
   [
     body('business_id').optional().isInt(),
     body('business_promotion_id').optional().isInt(),
     body('customer_name').notEmpty(),
-    body('customer_phone').notEmpty(),
   ],
   validate,
-  createBooking
+  createLead
 );
 router.patch(
   '/:id/status',
   authenticate,
   [body('status').notEmpty()],
   validate,
-  updateBookingStatus
+  updateLeadStatus
 );
 
 export default router;

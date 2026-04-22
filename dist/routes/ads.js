@@ -14,9 +14,14 @@ router.get('/campaigns/my', auth_1.authenticate, (0, requireFeature_1.requireFea
 // Authenticated: single campaign
 router.get('/campaigns/:id', auth_1.authenticate, adController_1.getCampaign);
 // Create campaign (requires 'ads' feature — boost+ tier)
-router.post('/campaigns', auth_1.authenticate, (0, requireFeature_1.requireFeature)('ads'), [
+router.post('/campaigns', auth_1.authenticate, (0, requireFeature_1.requireFeature)('ads', {
+    requirePromotionId: true,
+    promotionIdSource: 'body',
+    promotionIdField: 'promotion_id',
+}), [
     (0, express_validator_1.body)('title').isString().notEmpty().withMessage('title is required'),
     (0, express_validator_1.body)('ad_type').isString().notEmpty().withMessage('ad_type is required'),
+    (0, express_validator_1.body)('promotion_id').isInt({ min: 1 }).withMessage('promotion_id is required'),
     (0, express_validator_1.body)('daily_budget').optional().isFloat({ min: 100 }),
     (0, express_validator_1.body)('duration_days').optional().isInt({ min: 1, max: 365 }),
 ], adController_1.createCampaign);
