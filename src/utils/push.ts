@@ -34,6 +34,7 @@ export async function sendExpoPushNotification(
         data,
         sound: "default",
         priority: "high",
+        channelId: "default",
       }),
     });
 
