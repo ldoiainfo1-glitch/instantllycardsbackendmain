@@ -1061,7 +1061,8 @@ const migrateVouchers = async (db: any, collections: Set<string>, options: Migra
     const data: Prisma.VoucherUncheckedCreateInput = {
       legacy_id: legacyId ?? undefined,
       business_id: getMappedId(cardIdMap, idToString(doc.businessId)),
-      business_promotion_id: businessPromotionId,
+      // business_promotion_id set via cast below — column added in a later migration not yet merged to main
+      ...( { business_promotion_id: businessPromotionId } as any ),
       business_name: doc.businessName || doc.companyName || "Instantlly",
       title: doc.title || doc.voucherNumber || "Voucher",
       description: doc.description || undefined,
