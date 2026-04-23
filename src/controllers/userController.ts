@@ -60,14 +60,17 @@ export async function updateProfile(req: AuthRequest, res: Response): Promise<vo
 export async function updatePushToken(req: AuthRequest, res: Response): Promise<void> {
   const { pushToken } = req.body;
   const userId = req.user!.userId;
+  console.log(`[updatePushToken] userId=${userId} token=${pushToken ?? 'MISSING'}`);
 
   if (!pushToken || typeof pushToken !== 'string') {
+    console.warn('[updatePushToken] rejected: pushToken missing or not string');
     res.status(400).json({ error: 'pushToken is required' });
     return;
   }
 
   // Only accept Expo push tokens
   if (!pushToken.startsWith('ExponentPushToken[')) {
+    console.warn('[updatePushToken] rejected: bad format:', pushToken.slice(0, 30));
     res.status(400).json({ error: 'Invalid push token format' });
     return;
   }
