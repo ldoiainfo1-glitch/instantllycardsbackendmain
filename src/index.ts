@@ -29,6 +29,11 @@ import { initSocketService } from './services/socketService';
 const app = express();
 const httpServer = createServer(app);
 
+// Trust the first proxy (Nginx on EC2) so req.ip reflects the real client IP.
+// Without this, express-rate-limit sees every request as coming from 127.0.0.1
+// and rate-limits ALL users together.
+app.set('trust proxy', 1);
+
 // Socket.IO
 const io = new Server(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] },

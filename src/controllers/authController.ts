@@ -324,6 +324,21 @@ export async function login(req: Request, res: Response): Promise<void> {
   }
 }
 
+// In-memory grace cache for refresh-token rotation. When a token is rotated
+// we remember the replacement for a short window so that parallel /refresh
+// calls (multiple requests 401-ing at the same instant) all get the same
+// new tokens instead of the second/third call seeing "revoked".
+// Keyed by old token hash.
+const rotationGrace = new Map<string, { accessToken: string; refreshToken: string; expiresAt: number }>();
+const ROTATION_GRACE_MS = 30_000;
+
+function pruneGrace() {
+  const now = Date.now();
+  for (const [k, v] of rotationGrace) {
+    if (v.expiresAt < now) rotationGrace.delete(k);
+  }
+}
+
 export async function refresh(req: Request, res: Response): Promise<void> {
   const { refreshToken } = req.body;
   if (!refreshToken) {
@@ -340,6 +355,17 @@ export async function refresh(req: Request, res: Response): Promise<void> {
   }
 
   const tokenHash = hashToken(refreshToken);
+
+  // If this token was just rotated by a parallel request, return the cached
+  // replacement instead of 401ing. Prevents mass logouts on simultaneous
+  // 401 retries from multiple parallel API calls.
+  pruneGrace();
+  const cached = rotationGrace.get(tokenHash);
+  if (cached && cached.expiresAt > Date.now()) {
+    res.json({ accessToken: cached.accessToken, refreshToken: cached.refreshToken });
+    return;
+  }
+
   const stored = await prisma.refreshToken.findFirst({
     where: { user_id: payload.userId, token_hash: tokenHash },
   });
@@ -348,18 +374,25 @@ export async function refresh(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // Rotate: delete old, issue new (deleteMany avoids race-condition P2025)
-  await prisma.refreshToken.deleteMany({ where: { id: stored.id } });
-
+  // Rotate: issue new tokens, store in DB, delete old row, and cache the
+  // mapping old→new for the grace window.
   const roles = await getUserRoles(payload.userId);
   const newAccess = signAccessToken({ userId: payload.userId, roles });
   const newRefresh = signRefreshToken({ userId: payload.userId, roles });
+
   await prisma.refreshToken.create({
     data: {
       user_id: payload.userId,
       token_hash: hashToken(newRefresh),
       expires_at: refreshTokenExpiry(),
     },
+  });
+  await prisma.refreshToken.deleteMany({ where: { id: stored.id } });
+
+  rotationGrace.set(tokenHash, {
+    accessToken: newAccess,
+    refreshToken: newRefresh,
+    expiresAt: Date.now() + ROTATION_GRACE_MS,
   });
 
   res.json({ accessToken: newAccess, refreshToken: newRefresh });
