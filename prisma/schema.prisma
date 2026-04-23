@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -167,9 +168,6 @@ model BusinessCard {
   company_website       String?
   company_address       String?
   company_maps_link     String?
-  pincode               String?
-  gst_number            String?
-  pan_number            String?
   message               String?
   company_photo         String?
   about_business        String?
@@ -184,6 +182,9 @@ model BusinessCard {
   latitude              Float?
   longitude             Float?
   service_mode          String?
+  gst_number            String?
+  pan_number            String?
+  pincode               String?
   ads                   Ad[]
   bookings              Booking[]
   user                  User                   @relation(fields: [user_id], references: [id], onDelete: Cascade)
@@ -212,38 +213,45 @@ model BusinessCard {
 }
 
 model Booking {
-  id             Int           @id @default(autoincrement())
-  legacy_id      String?       @unique
-  user_id        Int
-  business_id    Int
-  business_name  String
-  mode           BookingMode
-  booking_date   DateTime
-  booking_time   String
-  customer_name  String
-  customer_phone String
-  notes          String?
-  status         BookingStatus @default(pending)
-  created_at     DateTime      @default(now())
-  business       BusinessCard  @relation(fields: [business_id], references: [id], onDelete: Cascade)
-  user           User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  id                    Int                @id @default(autoincrement())
+  legacy_id             String?            @unique
+  user_id               Int
+  business_id           Int?
+  business_name         String
+  mode                  BookingMode
+  booking_date          DateTime
+  booking_time          String
+  customer_name         String
+  customer_phone        String
+  notes                 String?
+  status                BookingStatus      @default(pending)
+  created_at            DateTime           @default(now())
+  business_promotion_id Int?
+  business              BusinessCard?      @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  BusinessPromotion     BusinessPromotion? @relation(fields: [business_promotion_id], references: [id])
+  user                  User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([business_id])
   @@index([user_id])
   @@index([created_at])
+  @@index([business_promotion_id], where: raw("(business_promotion_id IS NOT NULL)"))
 }
 
 model Review {
-  id          Int          @id @default(autoincrement())
-  legacy_id   String?      @unique
-  user_id     Int
-  business_id Int
-  rating      Int
-  comment     String?
-  photo_url   String?
-  created_at  DateTime     @default(now())
-  business    BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
-  user        User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  id                    Int                @id @default(autoincrement())
+  legacy_id             String?            @unique
+  user_id               Int
+  business_id           Int?
+  rating                Int
+  comment               String?
+  photo_url             String?
+  created_at            DateTime           @default(now())
+  business_promotion_id Int?
+  business              BusinessCard?      @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  BusinessPromotion     BusinessPromotion? @relation(fields: [business_promotion_id], references: [id])
+  user                  User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([business_promotion_id], where: raw("(business_promotion_id IS NOT NULL)"))
 }
 
 model Voucher {
@@ -290,18 +298,20 @@ model Voucher {
   source                String?
   transferred_from_id   Int?
   transferred_at        DateTime?
+  business_promotion_id Int
   ad_payment_orders     AdPaymentOrder[]     @relation("VoucherAdPaymentOrders")
   mlm_transfers         MlmTransfer[]        @relation("VoucherMlmTransfers")
   promotion_orders      PromotionOrder[]     @relation("VoucherPromotionOrders")
   special_credits       SpecialCredit[]      @relation("VoucherSpecialCredits")
   business              BusinessCard?        @relation(fields: [business_id], references: [id])
+  BusinessPromotion     BusinessPromotion    @relation(fields: [business_promotion_id], references: [id])
   created_by_admin      User?                @relation("VoucherAdmin", fields: [created_by_admin_id], references: [id])
   original_owner        User?                @relation("VoucherOriginalOwner", fields: [original_owner_id], references: [id])
   owner_user            User?                @relation("VoucherOwner", fields: [owner_user_id], references: [id])
   template              Voucher?             @relation("VoucherTemplate", fields: [template_id], references: [id])
   derived_vouchers      Voucher[]            @relation("VoucherTemplate")
   transferred_from      User?                @relation("VoucherTransferredFrom", fields: [transferred_from_id], references: [id])
-  claims                VoucherClaim[]
+  claims                VoucherClaim?
   voucher_redemptions   VoucherRedemption[]
   transfers             VoucherTransfer[]
   voucher_transfer_logs VoucherTransferLog[]
@@ -309,17 +319,24 @@ model Voucher {
   @@index([business_id])
   @@index([status])
   @@index([expires_at])
+  @@index([business_promotion_id])
+  @@index([business_promotion_id, status])
 }
 
 model VoucherClaim {
   id          Int       @id @default(autoincrement())
   legacy_id   String?   @unique
-  voucher_id  Int
+  voucher_id  Int       @unique(map: "VoucherClaim_one_active_owner_idx", where: raw("(status = 'active'::text)"))
   user_id     Int
   claimed_at  DateTime  @default(now())
   redeemed_at DateTime?
+  status      String    @default("active")
   user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
   voucher     Voucher   @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, voucher_id])
+  @@index([voucher_id, status])
+  @@index([voucher_id, user_id, status])
 }
 
 model VoucherTransfer {
@@ -337,40 +354,44 @@ model VoucherTransfer {
 }
 
 model Event {
-  id             Int                 @id @default(autoincrement())
-  legacy_id      String?             @unique
-  business_id    Int
-  title          String
-  description    String?
-  date           DateTime
-  time           String
-  location       String?
-  image_url      String?
-  ticket_price   Float?
-  max_attendees  Int?
-  attendee_count Int                 @default(0)
-  status         String              @default("active")
-  created_at     DateTime            @default(now())
-  business       BusinessCard        @relation(fields: [business_id], references: [id], onDelete: Cascade)
-  registrations  EventRegistration[]
+  id                    Int                 @id @default(autoincrement())
+  legacy_id             String?             @unique
+  business_id           Int?
+  title                 String
+  description           String?
+  date                  DateTime
+  time                  String
+  location              String?
+  image_url             String?
+  ticket_price          Float?
+  max_attendees         Int?
+  attendee_count        Int                 @default(0)
+  status                String              @default("active")
+  created_at            DateTime            @default(now())
+  business_promotion_id Int
+  business              BusinessCard?       @relation(fields: [business_id], references: [id])
+  BusinessPromotion     BusinessPromotion   @relation(fields: [business_promotion_id], references: [id], onDelete: Cascade)
+  registrations         EventRegistration[]
+
+  @@index([business_promotion_id])
+  @@index([business_promotion_id, status])
 }
 
 model EventRegistration {
-  id            Int      @id @default(autoincrement())
-  legacy_id     String?  @unique
-  event_id      Int
-  user_id       Int
-  ticket_count  Int      @default(1)
-  qr_code       String?
-  payment_status String   @default("not_required")
-  payment_order_id String?
-  payment_id    String?
+  id                Int      @id @default(autoincrement())
+  legacy_id         String?  @unique
+  event_id          Int
+  user_id           Int
+  ticket_count      Int      @default(1)
+  registered_at     DateTime @default(now())
+  qr_code           String?
+  payment_status    String   @default("not_required")
+  payment_order_id  String?
+  payment_id        String?
   payment_signature String?
-  amount_paid   Float?
-  registered_at DateTime @default(now())
-
-  event Event @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  user  User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  amount_paid       Float?
+  event             Event    @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user              User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([payment_id])
 }
@@ -385,6 +406,14 @@ model Notification {
   is_read     Boolean  @default(false)
   created_at  DateTime @default(now())
   user        User     @relation("UserNotifications", fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model PushReceipt {
+  receipt_id String   @id
+  push_token String
+  created_at DateTime @default(now())
+
+  @@index([created_at])
 }
 
 model Message {
@@ -505,16 +534,20 @@ model AdClick {
 }
 
 model Lead {
-  id             Int          @id @default(autoincrement())
-  legacy_id      String?      @unique
-  business_id    Int
-  customer_name  String
-  customer_phone String?
-  customer_email String?
-  message        String?
-  status         LeadStatus   @default(new)
-  created_at     DateTime     @default(now())
-  business       BusinessCard @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  id                    Int                @id @default(autoincrement())
+  legacy_id             String?            @unique
+  business_id           Int?
+  customer_name         String
+  customer_phone        String?
+  customer_email        String?
+  message               String?
+  status                LeadStatus         @default(new)
+  created_at            DateTime           @default(now())
+  business_promotion_id Int?
+  business              BusinessCard?      @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  BusinessPromotion     BusinessPromotion? @relation(fields: [business_promotion_id], references: [id])
+
+  @@index([business_promotion_id])
 }
 
 model LoyaltyPoint {
@@ -780,9 +813,9 @@ model Group {
   last_message_id   Int?              @unique
   last_message_time DateTime          @default(now())
   is_active         Boolean           @default(true)
-  is_sharing        Boolean           @default(false)
   created_at        DateTime          @default(now())
   updated_at        DateTime          @updatedAt
+  is_sharing        Boolean           @default(false)
   chats             Chat[]            @relation("GroupChats")
   admin             User              @relation("GroupAdmin", fields: [admin_id], references: [id], onDelete: Cascade)
   last_message      Message?          @relation("GroupLastMessage", fields: [last_message_id], references: [id])
@@ -942,8 +975,6 @@ model BusinessPromotion {
   pan_number                 String?
   listing_type               String           @default("free")
   listing_intent             String           @default("free")
-  plan_type                  String           @default("free")
-  tier                       String           @default("free") // free | growth | boost | scale
   status                     String           @default("draft")
   current_step               String?
   progress                   Int              @default(0)
@@ -964,10 +995,17 @@ model BusinessPromotion {
   expiry_date                DateTime?
   created_at                 DateTime         @default(now())
   updated_at                 DateTime         @updatedAt
+  plan_type                  String           @default("free")
+  tier                       String           @default("free")
+  Booking                    Booking[]
   business_card              BusinessCard?    @relation("BusinessCardPromotions", fields: [business_card_id], references: [id])
   user                       User             @relation("BusinessPromotionUser", fields: [user_id], references: [id], onDelete: Cascade)
   enquiries                  Enquiry[]        @relation("BusinessPromotionEnquiries")
+  Event                      Event[]
+  Lead                       Lead[]
   promotion_orders           PromotionOrder[] @relation("BusinessPromotionOrders")
+  Review                     Review[]
+  Voucher                    Voucher[]
 
   @@index([user_id])
   @@index([business_card_id])
@@ -1395,6 +1433,8 @@ model VoucherRedemption {
   used_by_id Int?
   used_by    User?    @relation("VoucherRedemptionUser", fields: [used_by_id], references: [id])
   voucher    Voucher  @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
+
+  @@unique([voucher_id, used_by_id])
 }
 
 model VoucherTransferLog {
@@ -1504,4 +1544,5 @@ enum MessageType {
   image
   file
   location
+  card
 }
