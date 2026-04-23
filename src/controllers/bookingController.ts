@@ -57,7 +57,7 @@ export async function getBooking(req: AuthRequest, res: Response): Promise<void>
 
   const userId = req.user!.userId;
   const isOwner = booking.user_id === userId;
-  const isBusinessOwner = booking.business.id === booking.business_id;
+  const isBusinessOwner = booking.business != null && booking.business.id === booking.business_id;
   const isAdmin = req.user!.roles.includes('admin');
   if (!isOwner && !isBusinessOwner && !isAdmin) {
     res.status(403).json({ error: 'Forbidden' }); return;
@@ -132,7 +132,7 @@ export async function updateBookingStatus(req: AuthRequest, res: Response): Prom
 
   const userId = req.user!.userId;
   const isCustomer = booking.user_id === userId;
-  const isBusinessOwner = booking.business.user_id === userId;
+  const isBusinessOwner = booking.business != null && booking.business.user_id === userId;
   const isAdmin = req.user!.roles.includes('admin');
 
   if (status === 'cancelled' && !isCustomer && !isBusinessOwner && !isAdmin) {
@@ -146,14 +146,16 @@ export async function updateBookingStatus(req: AuthRequest, res: Response): Prom
 
   // Notify the other party about the status change
   try {
-    const notifyUserId = isBusinessOwner ? booking.user_id : booking.business.user_id;
-    const notifyUser = await prisma.user.findUnique({ where: { id: notifyUserId }, select: { id: true, push_token: true } });
-    if (notifyUser) {
-      const io = getIO();
-      const payload = { type: 'booking:updated', bookingId: id, status, businessName: (booking as any).business_name };
-      if (io) io.to(`user:${notifyUser.id}`).emit('booking:updated', payload);
-      if (notifyUser.push_token) {
-        sendExpoPushNotification(notifyUser.push_token, 'Booking Updated', `Your booking has been ${status}`, { screen: 'Bookings' });
+    const notifyUserId = isBusinessOwner ? booking.user_id : booking.business?.user_id;
+    if (notifyUserId) {
+      const notifyUser = await prisma.user.findUnique({ where: { id: notifyUserId }, select: { id: true, push_token: true } });
+      if (notifyUser) {
+        const io = getIO();
+        const payload = { type: 'booking:updated', bookingId: id, status, businessName: (booking as any).business_name };
+        if (io) io.to(`user:${notifyUser.id}`).emit('booking:updated', payload);
+        if (notifyUser.push_token) {
+          sendExpoPushNotification(notifyUser.push_token, 'Booking Updated', `Your booking has been ${status}`, { screen: 'Bookings' });
+        }
       }
     }
   } catch { /* non-blocking */ }

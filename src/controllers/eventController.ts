@@ -103,6 +103,7 @@ export async function listMyEvents(req: AuthRequest, res: Response): Promise<voi
 export async function createEvent(req: AuthRequest, res: Response): Promise<void> {
   const {
     business_id,
+    business_promotion_id,
     title,
     description,
     date,
@@ -132,10 +133,27 @@ export async function createEvent(req: AuthRequest, res: Response): Promise<void
     res.status(403).json({ error: 'Forbidden' }); return;
   }
 
+  // Event requires a business_promotion_id. Prefer explicit body param;
+  // fall back to the most recent promotion linked to this business card.
+  let promotionId: number | null = business_promotion_id ? parseInt(business_promotion_id, 10) : null;
+  if (!promotionId) {
+    const promo = await prisma.businessPromotion.findFirst({
+      where: { business_card_id: businessId },
+      orderBy: { id: 'desc' },
+      select: { id: true },
+    });
+    promotionId = promo?.id ?? null;
+  }
+  if (!promotionId) {
+    console.log('[createEvent] no business_promotion_id and no promotion found for business:', businessId);
+    res.status(400).json({ error: 'business_promotion_id is required' }); return;
+  }
+
   try {
     const event = await prisma.event.create({
       data: {
         business_id: businessId,
+        business_promotion_id: promotionId,
         title,
         description: description || null,
         date: new Date(date),
@@ -165,8 +183,9 @@ export async function updateEvent(req: AuthRequest, res: Response): Promise<void
       include: { business: { select: { user_id: true } } },
     });
     if (!event) { console.log('[updateEvent] not found for id:', id); res.status(404).json({ error: 'Not found' }); return; }
-    if (event.business.user_id !== req.user!.userId && !req.user!.roles.includes('admin')) {
-      console.log('[updateEvent] forbidden — owner:', event.business.user_id, 'requester:', req.user!.userId);
+    const ownerId = event.business?.user_id;
+    if (ownerId !== req.user!.userId && !req.user!.roles.includes('admin')) {
+      console.log('[updateEvent] forbidden — owner:', ownerId, 'requester:', req.user!.userId);
       res.status(403).json({ error: 'Forbidden' }); return;
     }
 
@@ -305,7 +324,7 @@ export async function registerForEvent(req: AuthRequest, res: Response): Promise
   // Notify event organizer in real-time
   try {
     const eventWithBiz = await prisma.event.findUnique({ where: { id: eventId }, include: { business: { select: { user_id: true } } } });
-    if (eventWithBiz) {
+    if (eventWithBiz && eventWithBiz.business) {
       const organizer = await prisma.user.findUnique({ where: { id: eventWithBiz.business.user_id }, select: { id: true, push_token: true } });
       const attendee = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { name: true } });
       if (organizer && organizer.id !== req.user!.userId) {
@@ -393,8 +412,9 @@ export async function getEventRegistrations(req: AuthRequest, res: Response): Pr
       include: { business: { select: { user_id: true } } },
     });
     if (!event) { console.log('[getEventRegistrations] event not found:', eventId); res.status(404).json({ error: 'Event not found' }); return; }
-    if (event.business.user_id !== req.user!.userId && !req.user!.roles.includes('admin')) {
-      console.log('[getEventRegistrations] forbidden — owner:', event.business.user_id, 'requester:', req.user!.userId);
+    const ownerId = event.business?.user_id;
+    if (ownerId !== req.user!.userId && !req.user!.roles.includes('admin')) {
+      console.log('[getEventRegistrations] forbidden — owner:', ownerId, 'requester:', req.user!.userId);
       res.status(403).json({ error: 'Forbidden' }); return;
     }
 
@@ -457,7 +477,7 @@ export async function verifyRegistration(req: AuthRequest, res: Response): Promi
       where: { id: registration.event_id },
       include: { business: { select: { user_id: true } } },
     });
-    if (event && event.business.user_id !== req.user!.userId && !req.user!.roles.includes('admin')) {
+    if (event && event.business && event.business.user_id !== req.user!.userId && !req.user!.roles.includes('admin')) {
       console.log('[verifyRegistration] forbidden — owner:', event.business.user_id, 'requester:', req.user!.userId);
       res.status(403).json({ error: 'Only the event organizer or admin can verify registrations' });
       return;
