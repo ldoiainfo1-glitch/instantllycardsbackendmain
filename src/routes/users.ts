@@ -1,4 +1,4 @@
-import { Router, RequestHandler } from 'express';
+import { Router, Request, Response, RequestHandler } from 'express';
 import { body } from 'express-validator';
 import { authenticate } from '../middleware/auth';
 import { validate } from '../middleware/validate';
@@ -6,6 +6,15 @@ import { getProfile, updateProfile, getUserById, getUserLocation, upsertUserLoca
 
 const router = Router();
 const h = (fn: Function) => fn as RequestHandler;
+
+// ─── TEMPORARY DEBUG — remove after FCM is confirmed working ─────────────────
+router.post('/debug-push', (req: Request, res: Response) => {
+  console.log('[DEBUG-PUSH] Hit from:', req.headers['user-agent']);
+  console.log('[DEBUG-PUSH] Body:', JSON.stringify(req.body));
+  console.log('[DEBUG-PUSH] Auth header:', req.headers['authorization'] ? 'present' : 'missing');
+  res.json({ received: true, apiUrl: 'backend is reachable', body: req.body });
+});
+// ─────────────────────────────────────────────────────────────────────────────
 
 router.get('/profile', authenticate, h(getProfile));
 router.put('/profile', authenticate, h(updateProfile));
