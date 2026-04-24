@@ -142,7 +142,17 @@ export async function signup(req: Request, res: Response): Promise<void> {
       },
     });
 
-    // Send welcome notification to new user (socket — FCM token not available yet)
+    // Create welcome notification in DB so it appears in the notification tab
+    prisma.notification.create({
+      data: {
+        user_id: result.user.id,
+        type: 'welcome',
+        title: 'Welcome to Instantlly Cards! 🎉',
+        description: `Hi ${result.user.name ?? 'there'}! Your account is ready. Start exploring business cards, events & more.`,
+      },
+    }).catch(() => { /* non-blocking */ });
+
+    // Also emit via socket if user is already connected
     try {
       const io = getIO();
       if (io) {
@@ -305,19 +315,25 @@ export async function login(req: Request, res: Response): Promise<void> {
       user: { id: user.id, phone: user.phone, email: user.email, name: user.name, roles },
     });
 
-    // Send welcome back notification (socket + FCM if token exists)
-    try {
-      const io = getIO();
-      const welcomePayload = {
+    // Create welcome back notification in DB (once per day — skip if one was already created in last 24h)
+    prisma.notification.findFirst({
+      where: {
+        user_id: user.id,
         type: 'welcome_back',
-        title: `Welcome back! 👋`,
-        body: `Good to see you again, ${user.name ?? 'there'}!`,
-      };
-      if (io) io.to(`user:${user.id}`).emit('welcome_back', welcomePayload);
-      if (user.push_token) {
-        sendExpoPushNotification(user.push_token, `Welcome back! 👋`, `Good to see you again, ${user.name ?? 'there'}!`, {});
+        created_at: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      },
+    }).then((existing) => {
+      if (!existing) {
+        return prisma.notification.create({
+          data: {
+            user_id: user.id,
+            type: 'welcome_back',
+            title: 'Welcome back! 👋',
+            description: `Good to see you again, ${user.name ?? 'there'}!`,
+          },
+        });
       }
-    } catch { /* non-blocking */ }
+    }).catch(() => { /* non-blocking */ });
   } catch (err: any) {
     console.error('[LOGIN] Failed', err);
     res.status(500).json({ error: 'Login failed' });
