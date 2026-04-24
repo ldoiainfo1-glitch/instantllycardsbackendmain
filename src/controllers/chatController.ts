@@ -73,6 +73,28 @@ export async function getChatMessages(req: AuthRequest, res: Response) {
     });
     if (!participant) return res.status(403).json({ error: 'Not a participant in this chat' });
 
+    // Mark incoming messages as read when the user opens/fetches this chat.
+    await prisma.$transaction([
+      prisma.message.updateMany({
+        where: {
+          chat_id: chatId,
+          receiver_id: userId,
+          is_read: false,
+          is_deleted: false,
+        },
+        data: {
+          is_read: true,
+          read_at: new Date(),
+          is_delivered: true,
+          delivered_at: new Date(),
+        },
+      }),
+      prisma.chatParticipant.updateMany({
+        where: { chat_id: chatId, user_id: userId },
+        data: { unread_count: 0 },
+      }),
+    ]);
+
     const messages = await prisma.message.findMany({
       where: { chat_id: chatId, is_deleted: false },
       include: { sender: { select: { id: true, name: true, phone: true, profile_picture: true } } },

@@ -6,7 +6,6 @@ import { uploadToS3 } from '../utils/s3';
 
 const router = Router();
 
-// 5 MB limit, images only
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -19,7 +18,6 @@ const upload = multer({
   },
 });
 
-// ─── Business logo upload ───────────────────────────────────────────────────
 router.post(
   '/image',
   authenticate,
@@ -30,11 +28,9 @@ router.post(
         res.status(400).json({ error: 'No file provided' });
         return;
       }
-
-      const userId = (req as any).user?.userId || (req as any).userId;
+      const userId = (req as AuthRequest).user?.userId || (req as any).userId;
       const ext = req.file.originalname?.split('.').pop() || 'jpg';
       const key = `business-logos/${userId}/${Date.now()}.${ext}`;
-
       const url = await uploadToS3(req.file.buffer, key, req.file.mimetype);
       res.json({ url });
     } catch (err: any) {
@@ -44,23 +40,20 @@ router.post(
   }
 );
 
-// ─── Ad creative upload ─────────────────────────────────────────────────────
 router.post(
   '/ad-creative',
   authenticate,
   upload.single('file'),
-  async (req: AuthRequest, res: Response): Promise<void> => {
+  async (req: Request, res: Response): Promise<void> => {
     try {
       if (!req.file) {
         res.status(400).json({ error: 'No file provided' });
         return;
       }
-
-      const userId = req.user!.userId;
+      const userId = (req as AuthRequest).user!.userId;
       const ext = req.file.originalname?.split('.').pop() || 'jpg';
       const rand = Math.random().toString(36).slice(2, 8);
       const key = `ad-creatives/${userId}/${Date.now()}-${rand}.${ext}`;
-
       const url = await uploadToS3(req.file.buffer, key, req.file.mimetype);
       res.json({ url });
     } catch (err: any) {
@@ -70,18 +63,17 @@ router.post(
   }
 );
 
-// ─── Chat / group image upload ────────────────────────────────────────────────
 router.post(
   '/chat-image',
   authenticate,
   upload.single('file'),
-  async (req: AuthRequest, res: Response): Promise<void> => {
+  async (req: Request, res: Response): Promise<void> => {
     try {
       if (!req.file) {
         res.status(400).json({ error: 'No file provided' });
         return;
       }
-      const userId = req.user!.userId;
+      const userId = (req as AuthRequest).user!.userId;
       const ext = req.file.originalname?.split('.').pop() || 'jpg';
       const key = `chat-images/${userId}/${Date.now()}.${ext}`;
       const url = await uploadToS3(req.file.buffer, key, req.file.mimetype);

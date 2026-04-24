@@ -1044,35 +1044,25 @@ const migrateVouchers = async (db: any, collections: Set<string>, options: Migra
     const originalOwnerId = getMappedId(userIdMap, idToString(doc.originalOwner));
     const createdByAdmin = getMappedId(userIdMap, idToString(doc.createdByAdmin));
     const transferredFrom = getMappedId(userIdMap, idToString(doc.transferredFrom));
-    const mappedBusinessId = getMappedId(cardIdMap, idToString(doc.businessId));
-
-    let mappedPromotionId = getMappedId(
-      promotionIdMap,
-      idToString(doc.businessPromotionId || doc.promotionId || doc.businessPromotion || doc.promotion)
+    const promotionLegacyId = idToString(
+      doc.businessPromotionId || doc.promotionId || doc.businessPromotion || doc.promotion || doc.businessId
     );
+    const businessPromotionId = getMappedId(promotionIdMap, promotionLegacyId);
 
-    if (!mappedPromotionId && mappedBusinessId) {
-      const promo = await prisma.businessPromotion.findFirst({
-        where: { business_card_id: mappedBusinessId },
-        orderBy: { created_at: 'desc' },
-        select: { id: true },
+    if (!businessPromotionId) {
+      auditLog("voucher_missing_promotion", {
+        voucher_id: legacyId,
+        promotion_legacy_id: promotionLegacyId,
+        business_id_legacy: idToString(doc.businessId),
       });
-      mappedPromotionId = promo?.id;
-    }
-
-    if (!mappedPromotionId) {
-      auditLog('voucher_missing_promotion', {
-        legacy_id: legacyId,
-        missing_business_id: mappedBusinessId ?? null,
-      });
-      log.warn(`Voucher ${legacyId} missing mapped business promotion. Skipping.`);
       continue;
     }
 
-    const data = {
+    const data: Prisma.VoucherUncheckedCreateInput = {
       legacy_id: legacyId ?? undefined,
-      business_id: mappedBusinessId,
-      business_promotion_id: mappedPromotionId,
+      business_id: getMappedId(cardIdMap, idToString(doc.businessId)),
+      // business_promotion_id set via cast below — column added in a later migration not yet merged to main
+      ...( { business_promotion_id: businessPromotionId } as any ),
       business_name: doc.businessName || doc.companyName || "Instantlly",
       title: doc.title || doc.voucherNumber || "Voucher",
       description: doc.description || undefined,
@@ -1113,7 +1103,7 @@ const migrateVouchers = async (db: any, collections: Set<string>, options: Migra
       source: doc.source || undefined,
       transferred_from_id: transferredFrom,
       transferred_at: toDate(doc.transferredAt),
-    } as const;
+    };
 
     if (options.dryRun) {
       count += 1;

@@ -18,6 +18,9 @@ const needsSsl =
 const pool = new Pool({
   connectionString: databaseUrl,
   ssl: needsSsl ? { rejectUnauthorized: false } : undefined,
+  max: 2,
+  idleTimeoutMillis: 10000,
+  connectionTimeoutMillis: 5000,
 });
 const adapter = new PrismaPg(pool);
 

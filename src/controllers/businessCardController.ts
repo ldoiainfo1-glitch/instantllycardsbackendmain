@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { paramInt, queryInt, queryStr } from '../utils/params';
+import { getIO } from '../services/socketService';
+import { sendExpoPushNotification } from '../utils/push';
 
 /** Whitelisted fields for card create/update — prevents arbitrary field injection. */
 const CARD_FIELDS = [
@@ -249,6 +251,30 @@ export async function shareCard(req: AuthRequest, res: Response): Promise<void> 
         sender_profile_picture: sender.profile_picture,
       },
     });
+    // Notify recipient in real-time via socket
+    if (recipient) {
+      try {
+        const io = getIO();
+        if (io) {
+          io.to(`user:${recipient.id}`).emit('card:shared', {
+            id: share.id,
+            card_id: share.card_id,
+            card_title: share.card_title,
+            card_photo: share.card_photo,
+            sender_id: share.sender_id,
+            sender_name: share.sender_name,
+            recipient_id: share.recipient_id,
+            sent_at: share.sent_at || share.created_at,
+          });
+        }
+        // FCM push for when app is closed
+        const recipientUser = await prisma.user.findUnique({ where: { id: recipient.id }, select: { push_token: true } });
+        if (recipientUser?.push_token) {
+          sendExpoPushNotification(recipientUser.push_token, 'New Business Card', `${share.sender_name} shared their card with you`, { screen: 'Messaging', tab: 'Received' });
+        }
+      } catch { /* non-blocking */ }
+    }
+
     res.status(201).json(share);
   } catch (err) {
     console.error('[SHARE-CARD] Failed', err);
@@ -368,6 +394,27 @@ export async function bulkSendCard(req: AuthRequest, res: Response): Promise<voi
       })),
       skipDuplicates: true,
     });
+
+    // Notify each recipient via socket + FCM
+    try {
+      const io = getIO();
+      const recipientUsers = await prisma.user.findMany({
+        where: { id: { in: newRecipients.map((r) => r.user_id) } },
+        select: { id: true, push_token: true },
+      });
+      for (const u of recipientUsers) {
+        if (io) {
+          io.to(`user:${u.id}`).emit('card:shared', {
+            card_id: cardId,
+            card_title: senderCard.company_name || senderCard.full_name,
+            sender_name: sender.name || sender.phone,
+          });
+        }
+        if (u.push_token) {
+          sendExpoPushNotification(u.push_token, 'New Business Card', `${sender.name || sender.phone} shared their card with you`, { screen: 'Messaging', tab: 'Received' });
+        }
+      }
+    } catch { /* non-blocking */ }
 
     res.status(201).json({
       sent: newRecipients.length,

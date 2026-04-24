@@ -12,6 +12,8 @@ import { AuthRequest } from '../middleware/auth';
 import { jsonSafe } from '../utils/serialize';
 import { normalizePhone, phoneVariants } from '../utils/phone';
 import { generateOTP, storeOTP, verifyOTP, sendOTP } from '../utils/otp';
+import { getIO } from '../services/socketService';
+import { sendExpoPushNotification } from '../utils/push';
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 const log = (...args: any[]) => { if (!IS_PROD) console.log(...args); };
@@ -23,7 +25,7 @@ async function getUserRoles(userId: number): Promise<string[]> {
 }
 
 export async function signup(req: Request, res: Response): Promise<void> {
-  const { phone, email, password, name, role = 'customer' } = req.body;
+  const { phone, email, password, name, role = 'customer', referralCode } = req.body;
   const normalizedPhone = phone ? normalizePhone(phone) : phone;
   log(`[SIGNUP] Attempt — phone: ${phone} → normalized: ${normalizedPhone}, email: ${email ?? 'N/A'}, name: ${name ?? 'N/A'}, role: ${role}`);
 
@@ -53,12 +55,47 @@ export async function signup(req: Request, res: Response): Promise<void> {
     const password_hash = await bcrypt.hash(password, 10);
     const roles = [role];
 
+    // Generate a unique referral code for the new user
+    const newReferralCode = await generateUniqueReferralCode();
+
+    // Look up referrer if a referral code was provided
+    let referrerId: number | null = null;
+    if (referralCode && typeof referralCode === 'string' && referralCode.trim().length > 0) {
+      const referrer = await prisma.user.findFirst({
+        where: { referral_code: referralCode.trim().toUpperCase() },
+        select: { id: true },
+      });
+      if (!referrer) {
+        warn(`[SIGNUP] Invalid referral code: ${referralCode}`);
+        res.status(400).json({ error: 'Invalid referral code' });
+        return;
+      }
+      // Prevent self-referral
+      const existingUser = await prisma.user.findFirst({
+        where: { referral_code: referralCode.trim().toUpperCase() },
+        select: { id: true, phone: true },
+      });
+      if (existingUser && normalizedPhone && phoneVariants(phone).includes(existingUser.phone ?? '')) {
+        res.status(400).json({ error: 'You cannot use your own referral code' });
+        return;
+      }
+      referrerId = referrer.id;
+      log(`[SIGNUP] Referrer found — referralCode: ${referralCode}, referrerId: ${referrerId}`);
+    }
+
     // Atomic transaction: user + role + refresh token all succeed or all roll back
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
-        data: { phone: normalizedPhone, email: email || null, password_hash, name: name || null },
+        data: {
+          phone: normalizedPhone,
+          email: email || null,
+          password_hash,
+          name: name || null,
+          referral_code: newReferralCode,
+          referred_by_id: referrerId,
+        },
       });
-      log(`[SIGNUP] User created — id: ${user.id}, phone: ${user.phone}`);
+      log(`[SIGNUP] User created — id: ${user.id}, phone: ${user.phone}, referralCode: ${newReferralCode}`);
 
       await tx.userRole.create({ data: { user_id: user.id, role } });
       log(`[SIGNUP] Role assigned — userId: ${user.id}, role: ${role}`);
@@ -75,8 +112,22 @@ export async function signup(req: Request, res: Response): Promise<void> {
       });
       log(`[SIGNUP] Tokens issued — userId: ${user.id}`);
 
+      // Create referral record if referred
+      if (referrerId) {
+        await tx.referral.create({
+          data: { referrer_id: referrerId, referred_id: user.id, status: 'completed', reward_given: false },
+        });
+      }
+
       return { user, accessToken, refreshToken };
     });
+
+    // Award referral bonus OUTSIDE the main transaction (non-blocking)
+    if (referrerId) {
+      processReferralReward(referrerId, result.user.id).catch((err) => {
+        console.error('[SIGNUP] Referral reward processing failed (non-blocking):', err);
+      });
+    }
 
     res.status(201).json({
       accessToken: result.accessToken,
@@ -87,8 +138,21 @@ export async function signup(req: Request, res: Response): Promise<void> {
         email: result.user.email,
         name: result.user.name,
         roles,
+        referralCode: newReferralCode,
       },
     });
+
+    // Send welcome notification to new user (socket — FCM token not available yet)
+    try {
+      const io = getIO();
+      if (io) {
+        io.to(`user:${result.user.id}`).emit('welcome', {
+          type: 'welcome',
+          title: `Welcome to Instantlly Cards! 🎉`,
+          body: `Hi ${result.user.name ?? 'there'}! Your account is ready. Start exploring business cards, events & more.`,
+        });
+      }
+    } catch { /* non-blocking */ }
   } catch (err: any) {
     if (err?.code === 'P2002') {
       warn(`[SIGNUP] Conflict (unique constraint) — ${normalizedPhone ?? email}`);
@@ -97,6 +161,90 @@ export async function signup(req: Request, res: Response): Promise<void> {
     }
     console.error('[SIGNUP] Failed', err);
     res.status(500).json({ error: 'Signup failed' });
+  }
+}
+
+// ── Referral helpers ───────────────────────────────────────────────────────────
+
+function generateReferralCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
+async function generateUniqueReferralCode(): Promise<string> {
+  for (let i = 0; i < 20; i++) {
+    const code = generateReferralCode();
+    const exists = await prisma.user.findFirst({ where: { referral_code: code } });
+    if (!exists) return code;
+  }
+  // Fallback: timestamp-based
+  return generateReferralCode() + Date.now().toString(36).slice(-2).toUpperCase();
+}
+
+async function processReferralReward(referrerId: number, newUserId: number): Promise<void> {
+  try {
+    // Get config
+    const config = await prisma.creditConfig.findFirst();
+    const rewardAmount = config?.referral_reward ?? 300;
+
+    if (rewardAmount <= 0) return;
+
+    const [referrer, newUser] = await Promise.all([
+      prisma.user.findUnique({ where: { id: referrerId } }),
+      prisma.user.findUnique({ where: { id: newUserId } }),
+    ]);
+    if (!referrer || !newUser) return;
+
+    const referrerNewBalance = Number(referrer.credits ?? 0) + rewardAmount;
+    const newUserNewBalance = Number(newUser.credits ?? 0) + rewardAmount;
+
+    await prisma.$transaction(async (tx) => {
+      // Award credits to referrer (clear expiry so old expired dates don't zero out new credits)
+      await tx.user.update({
+        where: { id: referrerId },
+        data: { credits: BigInt(referrerNewBalance), credits_expiry_date: null },
+      });
+
+      await tx.transaction.create({
+        data: {
+          type: 'referral_bonus',
+          to_user_id: referrerId,
+          from_user_id: newUserId,
+          amount: rewardAmount,
+          description: `Referral bonus: ${newUser.name ?? newUser.phone ?? 'A friend'} joined using your code`,
+          status: 'completed',
+          balance_after: referrerNewBalance,
+        },
+      });
+
+      // Award credits to new user (referred user)
+      await tx.user.update({
+        where: { id: newUserId },
+        data: { credits: BigInt(newUserNewBalance) },
+      });
+
+      await tx.transaction.create({
+        data: {
+          type: 'signup_bonus',
+          to_user_id: newUserId,
+          from_user_id: referrerId,
+          amount: rewardAmount,
+          description: `Signup bonus: joined via referral code`,
+          status: 'completed',
+          balance_after: newUserNewBalance,
+        },
+      });
+
+      // Mark referral as reward given
+      await tx.referral.updateMany({
+        where: { referrer_id: referrerId, referred_id: newUserId },
+        data: { reward_given: true },
+      });
+    });
+
+    log(`[REFERRAL] Awarded ${rewardAmount} credits each to referrer ${referrerId} and new user ${newUserId}`);
+  } catch (err) {
+    console.error('[REFERRAL] Failed to process reward:', err);
   }
 }
 
@@ -156,9 +304,38 @@ export async function login(req: Request, res: Response): Promise<void> {
       refreshToken,
       user: { id: user.id, phone: user.phone, email: user.email, name: user.name, roles },
     });
+
+    // Send welcome back notification (socket + FCM if token exists)
+    try {
+      const io = getIO();
+      const welcomePayload = {
+        type: 'welcome_back',
+        title: `Welcome back! 👋`,
+        body: `Good to see you again, ${user.name ?? 'there'}!`,
+      };
+      if (io) io.to(`user:${user.id}`).emit('welcome_back', welcomePayload);
+      if (user.push_token) {
+        sendExpoPushNotification(user.push_token, `Welcome back! 👋`, `Good to see you again, ${user.name ?? 'there'}!`, {});
+      }
+    } catch { /* non-blocking */ }
   } catch (err: any) {
     console.error('[LOGIN] Failed', err);
     res.status(500).json({ error: 'Login failed' });
+  }
+}
+
+// In-memory grace cache for refresh-token rotation. When a token is rotated
+// we remember the replacement for a short window so that parallel /refresh
+// calls (multiple requests 401-ing at the same instant) all get the same
+// new tokens instead of the second/third call seeing "revoked".
+// Keyed by old token hash.
+const rotationGrace = new Map<string, { accessToken: string; refreshToken: string; expiresAt: number }>();
+const ROTATION_GRACE_MS = 30_000;
+
+function pruneGrace() {
+  const now = Date.now();
+  for (const [k, v] of rotationGrace) {
+    if (v.expiresAt < now) rotationGrace.delete(k);
   }
 }
 
@@ -178,6 +355,17 @@ export async function refresh(req: Request, res: Response): Promise<void> {
   }
 
   const tokenHash = hashToken(refreshToken);
+
+  // If this token was just rotated by a parallel request, return the cached
+  // replacement instead of 401ing. Prevents mass logouts on simultaneous
+  // 401 retries from multiple parallel API calls.
+  pruneGrace();
+  const cached = rotationGrace.get(tokenHash);
+  if (cached && cached.expiresAt > Date.now()) {
+    res.json({ accessToken: cached.accessToken, refreshToken: cached.refreshToken });
+    return;
+  }
+
   const stored = await prisma.refreshToken.findFirst({
     where: { user_id: payload.userId, token_hash: tokenHash },
   });
@@ -186,18 +374,25 @@ export async function refresh(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // Rotate: delete old, issue new (deleteMany avoids race-condition P2025)
-  await prisma.refreshToken.deleteMany({ where: { id: stored.id } });
-
+  // Rotate: issue new tokens, store in DB, delete old row, and cache the
+  // mapping old→new for the grace window.
   const roles = await getUserRoles(payload.userId);
   const newAccess = signAccessToken({ userId: payload.userId, roles });
   const newRefresh = signRefreshToken({ userId: payload.userId, roles });
+
   await prisma.refreshToken.create({
     data: {
       user_id: payload.userId,
       token_hash: hashToken(newRefresh),
       expires_at: refreshTokenExpiry(),
     },
+  });
+  await prisma.refreshToken.deleteMany({ where: { id: stored.id } });
+
+  rotationGrace.set(tokenHash, {
+    accessToken: newAccess,
+    refreshToken: newRefresh,
+    expiresAt: Date.now() + ROTATION_GRACE_MS,
   });
 
   res.json({ accessToken: newAccess, refreshToken: newRefresh });

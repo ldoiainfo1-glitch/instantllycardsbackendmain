@@ -1,8 +1,7 @@
-import { Router } from 'express';
+import { Router, RequestHandler } from 'express';
 import { body } from 'express-validator';
 import { validate } from '../middleware/validate';
 import { authenticate, requireRole } from '../middleware/auth';
-import { requireFeature } from '../middleware/requireFeature';
 import {
   listVouchers,
   getVoucher,
@@ -12,43 +11,35 @@ import {
   getMyVouchers,
   getMyCreatedVouchers,
   getMyTransfers,
-  redeemVoucher,
-  updateVoucherStatus,
 } from '../controllers/voucherController';
 
 const router = Router();
+const h = (fn: Function) => fn as RequestHandler;
 
-router.get('/', listVouchers);
-router.get('/my', authenticate, getMyVouchers);
-router.get('/created', authenticate, requireRole('business', 'admin'), getMyCreatedVouchers);
-router.get('/transfers', authenticate, getMyTransfers);
-router.get('/:id', getVoucher);
+router.get('/', h(listVouchers));
+router.get('/my', authenticate, h(getMyVouchers));
+router.get('/created', authenticate, requireRole('business', 'admin'), h(getMyCreatedVouchers));
+router.get('/transfers', authenticate, h(getMyTransfers));
+router.get('/:id', h(getVoucher));
 router.post(
   '/',
   authenticate,
   requireRole('business', 'admin'),
-  requireFeature('voucher', {
-    requirePromotionId: true,
-    promotionIdSource: 'body',
-    promotionIdField: 'business_promotion_id',
-  }),
   [
     body('business_promotion_id').isInt(),
     body('title').notEmpty(),
     body('discount_value').notEmpty(),
   ],
   validate,
-  createVoucher
+  h(createVoucher)
 );
-router.post('/:id/claim', authenticate, claimVoucher);
-router.patch('/:id/status', authenticate, [body('status').notEmpty()], validate, updateVoucherStatus);
-router.post('/redeem', authenticate, [body('voucher_id').isInt()], validate, redeemVoucher);
+router.post('/:id/claim', authenticate, h(claimVoucher));
 router.post(
   '/transfer',
   authenticate,
   [body('voucher_id').isInt(), body('recipient_phone').notEmpty()],
   validate,
-  transferVoucher
+  h(transferVoucher)
 );
 
 export default router;

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, RequestHandler } from 'express';
 import {
   listCategories,
   listMobileCategories,
@@ -14,18 +14,19 @@ import {
 import { authenticate, requireRole } from '../middleware/auth';
 
 const router = Router();
+const h = (fn: Function) => fn as RequestHandler;
 
-router.get('/mobile', listMobileCategories);
-router.get('/mobile/:categoryId/subcategories', getMobileSubcategories);
-router.get('/tree', getCategoryTree);
-router.get('/tree/admin', authenticate, requireRole('admin'), getCategoryTreeAdmin);
+router.get('/mobile', h(listMobileCategories));
+router.get('/mobile/:categoryId/subcategories', h(getMobileSubcategories));
+router.get('/tree', h(getCategoryTree));
+router.get('/tree/admin', authenticate, requireRole('admin'), h(getCategoryTreeAdmin));
 
-router.post('/admin/node', authenticate, requireRole('admin'), createCategoryNode);
-router.put('/admin/node/:id', authenticate, requireRole('admin'), updateCategoryNode);
-router.delete('/admin/node/:id', authenticate, requireRole('admin'), deleteCategoryNode);
+router.post('/admin/node', authenticate, requireRole('admin'), h(createCategoryNode));
+router.put('/admin/node/:id', authenticate, requireRole('admin'), h(updateCategoryNode));
+router.delete('/admin/node/:id', authenticate, requireRole('admin'), h(deleteCategoryNode));
 
-router.get('/', listCategories);
-router.get('/:id/cards', getCategoryBusinessCards);
-router.get('/:id', getCategoryById);
+router.get('/', h(listCategories));
+router.get('/:id/cards', h(getCategoryBusinessCards));
+router.get('/:id', h(getCategoryById));
 
 export default router;
