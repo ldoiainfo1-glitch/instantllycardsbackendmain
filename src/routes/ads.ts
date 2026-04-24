@@ -26,10 +26,15 @@ router.get('/campaigns/:id', authenticate, h(getCampaign));
 router.post(
   '/campaigns',
   authenticate,
-  requireFeature('ads'),
+  requireFeature('ads', {
+    requirePromotionId: true,
+    promotionIdSource: 'body',
+    promotionIdField: 'promotion_id',
+  }),
   [
     body('title').isString().notEmpty().withMessage('title is required'),
     body('ad_type').isString().notEmpty().withMessage('ad_type is required'),
+    body('promotion_id').isInt({ min: 1 }).withMessage('promotion_id is required'),
     body('daily_budget').optional().isFloat({ min: 100 }),
     body('duration_days').optional().isInt({ min: 1, max: 365 }),
   ],

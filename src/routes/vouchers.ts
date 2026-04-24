@@ -2,6 +2,7 @@ import { Router, RequestHandler } from 'express';
 import { body } from 'express-validator';
 import { validate } from '../middleware/validate';
 import { authenticate, requireRole } from '../middleware/auth';
+import { requireFeature } from '../middleware/requireFeature';
 import {
   listVouchers,
   getVoucher,
@@ -11,6 +12,8 @@ import {
   getMyVouchers,
   getMyCreatedVouchers,
   getMyTransfers,
+  redeemVoucher,
+  updateVoucherStatus,
 } from '../controllers/voucherController';
 
 const router = Router();
@@ -25,6 +28,11 @@ router.post(
   '/',
   authenticate,
   requireRole('business', 'admin'),
+  requireFeature('voucher', {
+    requirePromotionId: true,
+    promotionIdSource: 'body',
+    promotionIdField: 'business_promotion_id',
+  }),
   [
     body('business_promotion_id').isInt(),
     body('title').notEmpty(),
@@ -34,6 +42,8 @@ router.post(
   h(createVoucher)
 );
 router.post('/:id/claim', authenticate, h(claimVoucher));
+router.patch('/:id/status', authenticate, [body('status').notEmpty()], validate, h(updateVoucherStatus));
+router.post('/redeem', authenticate, [body('voucher_id').isInt()], validate, h(redeemVoucher));
 router.post(
   '/transfer',
   authenticate,

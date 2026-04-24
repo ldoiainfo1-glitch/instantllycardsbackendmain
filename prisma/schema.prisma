@@ -217,8 +217,8 @@ model Booking {
   legacy_id             String?            @unique
   user_id               Int
   business_id           Int?
+  business_promotion_id Int?
   business_name         String
-  mode                  BookingMode
   booking_date          DateTime
   booking_time          String
   customer_name         String
@@ -226,15 +226,15 @@ model Booking {
   notes                 String?
   status                BookingStatus      @default(pending)
   created_at            DateTime           @default(now())
-  business_promotion_id Int?
   business              BusinessCard?      @relation(fields: [business_id], references: [id], onDelete: Cascade)
-  BusinessPromotion     BusinessPromotion? @relation(fields: [business_promotion_id], references: [id])
+  business_promotion    BusinessPromotion? @relation("BusinessPromotionBookings", fields: [business_promotion_id], references: [id], onDelete: SetNull)
   user                  User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([business_id])
+  @@index([business_promotion_id])
   @@index([user_id])
   @@index([created_at])
-  @@index([business_promotion_id], where: raw("(business_promotion_id IS NOT NULL)"))
+  @@index([business_promotion_id], map: "Booking_business_promotion_id_not_null_idx", where: raw("(business_promotion_id IS NOT NULL)"))
 }
 
 model Review {
@@ -242,22 +242,25 @@ model Review {
   legacy_id             String?            @unique
   user_id               Int
   business_id           Int?
+  business_promotion_id Int?
   rating                Int
   comment               String?
   photo_url             String?
   created_at            DateTime           @default(now())
-  business_promotion_id Int?
   business              BusinessCard?      @relation(fields: [business_id], references: [id], onDelete: Cascade)
-  BusinessPromotion     BusinessPromotion? @relation(fields: [business_promotion_id], references: [id])
+  business_promotion    BusinessPromotion? @relation("BusinessPromotionReviews", fields: [business_promotion_id], references: [id], onDelete: SetNull)
   user                  User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
-  @@index([business_promotion_id], where: raw("(business_promotion_id IS NOT NULL)"))
+  @@index([business_id])
+  @@index([business_promotion_id])
+  @@index([business_promotion_id], map: "Review_business_promotion_id_not_null_idx", where: raw("(business_promotion_id IS NOT NULL)"))
 }
 
 model Voucher {
   id                    Int                  @id @default(autoincrement())
   legacy_id             String?              @unique
   business_id           Int?
+  business_promotion_id Int
   business_name         String
   title                 String
   description           String?
@@ -298,13 +301,12 @@ model Voucher {
   source                String?
   transferred_from_id   Int?
   transferred_at        DateTime?
-  business_promotion_id Int
   ad_payment_orders     AdPaymentOrder[]     @relation("VoucherAdPaymentOrders")
   mlm_transfers         MlmTransfer[]        @relation("VoucherMlmTransfers")
   promotion_orders      PromotionOrder[]     @relation("VoucherPromotionOrders")
   special_credits       SpecialCredit[]      @relation("VoucherSpecialCredits")
   business              BusinessCard?        @relation(fields: [business_id], references: [id])
-  BusinessPromotion     BusinessPromotion    @relation(fields: [business_promotion_id], references: [id])
+  business_promotion    BusinessPromotion    @relation(fields: [business_promotion_id], references: [id])
   created_by_admin      User?                @relation("VoucherAdmin", fields: [created_by_admin_id], references: [id])
   original_owner        User?                @relation("VoucherOriginalOwner", fields: [original_owner_id], references: [id])
   owner_user            User?                @relation("VoucherOwner", fields: [owner_user_id], references: [id])
@@ -317,10 +319,10 @@ model Voucher {
   voucher_transfer_logs VoucherTransferLog[]
 
   @@index([business_id])
-  @@index([status])
-  @@index([expires_at])
   @@index([business_promotion_id])
   @@index([business_promotion_id, status])
+  @@index([status])
+  @@index([expires_at])
 }
 
 model VoucherClaim {
@@ -357,6 +359,7 @@ model Event {
   id                    Int                 @id @default(autoincrement())
   legacy_id             String?             @unique
   business_id           Int?
+  business_promotion_id Int
   title                 String
   description           String?
   date                  DateTime
@@ -368,9 +371,8 @@ model Event {
   attendee_count        Int                 @default(0)
   status                String              @default("active")
   created_at            DateTime            @default(now())
-  business_promotion_id Int
-  business              BusinessCard?       @relation(fields: [business_id], references: [id])
-  BusinessPromotion     BusinessPromotion   @relation(fields: [business_promotion_id], references: [id], onDelete: Cascade)
+  business              BusinessCard?       @relation(fields: [business_id], references: [id], onDelete: SetNull)
+  business_promotion    BusinessPromotion   @relation("BusinessPromotionEvents", fields: [business_promotion_id], references: [id], onDelete: Cascade)
   registrations         EventRegistration[]
 
   @@index([business_promotion_id])
@@ -537,15 +539,15 @@ model Lead {
   id                    Int                @id @default(autoincrement())
   legacy_id             String?            @unique
   business_id           Int?
+  business_promotion_id Int?
   customer_name         String
   customer_phone        String?
   customer_email        String?
   message               String?
   status                LeadStatus         @default(new)
   created_at            DateTime           @default(now())
-  business_promotion_id Int?
   business              BusinessCard?      @relation(fields: [business_id], references: [id], onDelete: Cascade)
-  BusinessPromotion     BusinessPromotion? @relation(fields: [business_promotion_id], references: [id])
+  business_promotion    BusinessPromotion? @relation("BusinessPromotionLeads", fields: [business_promotion_id], references: [id], onDelete: SetNull)
 
   @@index([business_promotion_id])
 }
@@ -997,15 +999,15 @@ model BusinessPromotion {
   updated_at                 DateTime         @updatedAt
   plan_type                  String           @default("free")
   tier                       String           @default("free")
-  Booking                    Booking[]
   business_card              BusinessCard?    @relation("BusinessCardPromotions", fields: [business_card_id], references: [id])
   user                       User             @relation("BusinessPromotionUser", fields: [user_id], references: [id], onDelete: Cascade)
   enquiries                  Enquiry[]        @relation("BusinessPromotionEnquiries")
-  Event                      Event[]
-  Lead                       Lead[]
   promotion_orders           PromotionOrder[] @relation("BusinessPromotionOrders")
-  Review                     Review[]
-  Voucher                    Voucher[]
+  bookings                   Booking[]        @relation("BusinessPromotionBookings")
+  reviews                    Review[]         @relation("BusinessPromotionReviews")
+  leads                      Lead[]           @relation("BusinessPromotionLeads")
+  events                     Event[]          @relation("BusinessPromotionEvents")
+  vouchers                   Voucher[]
 
   @@index([user_id])
   @@index([business_card_id])
