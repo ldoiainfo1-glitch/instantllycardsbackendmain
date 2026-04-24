@@ -1,6 +1,39 @@
 import { Request, Response, NextFunction, RequestHandler } from "express";
 import { verifyAccessToken, JwtPayload } from "../utils/jwt";
 
+/**
+ * requireAdminKey — accepts x-admin-key header OR Bearer JWT with admin role.
+ * Used by Instantlly-admin Next.js panel (sends x-admin-key on every request).
+ */
+export const requireAdminKey: RequestHandler = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void => {
+  const adminKey = process.env.ADMIN_KEY || '';
+
+  // 1. x-admin-key header (used by admin panel)
+  if (adminKey && req.headers['x-admin-key'] === adminKey) {
+    next();
+    return;
+  }
+
+  // 2. Bearer JWT with admin role
+  const header = req.headers.authorization;
+  if (header?.startsWith('Bearer ')) {
+    try {
+      const payload = verifyAccessToken(header.slice(7));
+      if (payload.roles?.includes('admin')) {
+        (req as AuthRequest).user = payload;
+        next();
+        return;
+      }
+    } catch {}
+  }
+
+  res.status(401).json({ error: 'Admin access required. Provide x-admin-key header or admin JWT.' });
+};
+
 export interface AuthRequest extends Request {
   userId: any;
   user?: JwtPayload;

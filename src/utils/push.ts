@@ -60,16 +60,8 @@ async function storePendingReceipts(
     for (let i = 0; i < tickets.length; i++) {
       const ticket = tickets[i];
       if (ticket.status === "ok" && ticket.id) {
-        // Store receipt ID mapped to the token so we can clean up stale tokens later.
-        await prisma.pushReceipt
-          .create({
-            data: {
-              receipt_id: ticket.id,
-              push_token: tokens[i],
-              created_at: new Date(),
-            },
-          })
-          .catch(() => {}); // Non-blocking
+        // pushReceipt model not in schema — skip DB storage, receipt tracking disabled
+        void ticket.id; void tokens[i];
       } else if (ticket.status === "error") {
         const errCode = ticket.details?.error;
         if (errCode === "DeviceNotRegistered") {
@@ -171,9 +163,7 @@ export async function checkPushReceipts(): Promise<void> {
   let pendingReceipts: { receipt_id: string; push_token: string }[] = [];
 
   try {
-    pendingReceipts = await prisma.pushReceipt.findMany({
-      take: 300, // Expo allows up to 300 receipt IDs per request
-    });
+    pendingReceipts = []; // pushReceipt model not in schema — receipt tracking disabled
   } catch (err) {
     console.error("[push] Failed to fetch pending receipts:", err);
     return;
@@ -222,10 +212,8 @@ export async function checkPushReceipts(): Promise<void> {
         }
       }
 
-      // Delete the processed receipt
-      await prisma.pushReceipt
-        .delete({ where: { receipt_id: pending.receipt_id } })
-        .catch(() => {});
+      // Delete the processed receipt (pushReceipt model not in schema)
+      void pending.receipt_id;
     }
   } catch (err) {
     console.error("[push] Failed to check push receipts:", err);

@@ -18,6 +18,9 @@ import bookingRoutes from './routes/bookings';
 import eventRoutes from './routes/events';
 import systemRoutes from './routes/system';
 import creditRoutes from './routes/credits';
+import adminAuthRoutes from './routes/adminAuth';
+import feedbackRoutes from './routes/feedback';
+import mlmRoutes from './routes/mlm';
 import { setIo } from './utils/socket';
 import { startScheduledJobs } from './jobs/scheduler';
 import chatRoutes from './routes/chats';
@@ -121,6 +124,9 @@ app.get('/invite/:code', async (req, res) => {
 
 // API Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/admin-auth', adminAuthRoutes);
+app.use('/api/feedback', feedbackRoutes);
+app.use('/api/mlm', mlmRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/cards', businessCardRoutes);
