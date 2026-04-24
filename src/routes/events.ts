@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, RequestHandler } from 'express';
 import { body } from 'express-validator';
 import { validate } from '../middleware/validate';
 import { authenticate, requireRole } from '../middleware/auth';
@@ -16,12 +16,13 @@ import {
 } from '../controllers/eventController';
 
 const router = Router();
+const h = (fn: Function) => fn as RequestHandler;
 
-router.get('/', listEvents);
-router.get('/my', authenticate, requireRole('business', 'admin'), listMyEvents);
-router.get('/registrations/my', authenticate, getMyRegistrations);
-router.get('/:id', getEvent);
-router.get('/:id/registrations', authenticate, getEventRegistrations);
+router.get('/', h(listEvents));
+router.get('/my', authenticate, requireRole('business', 'admin'), h(listMyEvents));
+router.get('/registrations/my', authenticate, h(getMyRegistrations));
+router.get('/:id', h(getEvent));
+router.get('/:id/registrations', authenticate, h(getEventRegistrations));
 router.post(
   '/',
   authenticate,
@@ -33,11 +34,11 @@ router.post(
     body('time').notEmpty(),
   ],
   validate,
-  createEvent
+  h(createEvent)
 );
-router.put('/:id', authenticate, updateEvent);
-router.post('/:id/payment-intent', authenticate, createEventPaymentIntent);
-router.post('/:id/register', authenticate, registerForEvent);
-router.post('/verify', authenticate, verifyRegistration);
+router.put('/:id', authenticate, h(updateEvent));
+router.post('/:id/payment-intent', authenticate, h(createEventPaymentIntent));
+router.post('/:id/register', authenticate, h(registerForEvent));
+router.post('/verify', authenticate, h(verifyRegistration));
 
 export default router;

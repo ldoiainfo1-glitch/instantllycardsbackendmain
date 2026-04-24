@@ -343,7 +343,7 @@ export async function getPromotion(req: Request, res: Response): Promise<void> {
   res.json({ ...promo, effectiveTier: effectiveTier((promo as any).tier ?? 'free', (promo as any).status) });
 }
 
-export async function createPromotion(req: AuthRequest, res: Response): Promise<void> {
+export async function  createPromotion(req: AuthRequest, res: Response): Promise<void> {
   const userId = req.user!.userId;
   const {
     business_name, owner_name, description, email, phone, whatsapp, website,

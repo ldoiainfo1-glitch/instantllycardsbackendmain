@@ -109,20 +109,18 @@ export async function sendOTP(phone: string, otp: string): Promise<void> {
 
   // Send actual SMS via Fast2SMS (works in both dev and production)
   try {
-    const response = await fetch('https://www.fast2sms.com/dev/bulkV2', {
-      method: 'POST',
-      headers: {
-        'authorization': FAST2SMS_API_KEY,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        route: 'v3',
-        sender_id: FAST2SMS_SENDER_ID,
-        message: message,
-        language: 'english',
-        flash: 0,
-        numbers: phoneNumber,
-      }),
+    const params = new URLSearchParams({
+      authorization: FAST2SMS_API_KEY,
+      sender_id: FAST2SMS_SENDER_ID,
+      message: message,
+      language: 'english',
+      route: 'q',
+      numbers: phoneNumber,
+    });
+
+    const response = await fetch(`https://www.fast2sms.com/dev/bulkV2?${params.toString()}`, {
+      method: 'GET',
+      headers: { 'Cache-Control': 'no-cache' },
     });
 
     const responseText = await response.text();

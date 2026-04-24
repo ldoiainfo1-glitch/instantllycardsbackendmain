@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import prisma from '../prismaClient';
 import { AuthRequest } from '../middleware/auth';
+import { getIO } from '../services/socketService';
+import { sendExpoPushNotification } from '../utils/push';
 
 /** POST /api/messages/send — REST fallback for sending a message (when socket unavailable) */
 export async function sendMessage(req: AuthRequest, res: Response) {
@@ -38,6 +40,46 @@ export async function sendMessage(req: AuthRequest, res: Response) {
         where: { id: groupId },
         data: { last_message_id: message.id, last_message_time: message.created_at },
       });
+
+      // Emit real-time notification to all other group members via their personal socket room
+      try {
+        const io = getIO();
+        if (io) {
+          const members = await prisma.groupMember.findMany({
+            where: { group_id: groupId, user_id: { not: userId } },
+            select: { user_id: true },
+          });
+          const group = await prisma.group.findUnique({
+            where: { id: groupId },
+            select: { name: true },
+          });
+          const payload = {
+            groupId,
+            groupName: group?.name ?? 'Group',
+            senderId: userId,
+            senderName: message.sender?.name ?? 'Someone',
+            content: message.content,
+            messageType: message.message_type,
+            createdAt: message.created_at,
+          };
+          for (const m of members) {
+            io.to(`user:${m.user_id}`).emit('group:notification', payload);
+          }
+
+          // FCM push for group message
+          const membersWithTokens = await prisma.groupMember.findMany({
+            where: { group_id: groupId, user_id: { not: userId } },
+            include: { user: { select: { id: true, push_token: true } } },
+          });
+          const isCard = (() => { try { const p = JSON.parse(content); return !!(p?.full_name || p?.company_name); } catch { return false; } })();
+          const body = isCard ? 'Sent a business card' : content.length > 60 ? content.slice(0, 60) + '...' : content;
+          for (const m of membersWithTokens) {
+            if (m.user?.push_token) {
+              sendExpoPushNotification(m.user.push_token, group?.name ?? 'Group', `${message.sender?.name ?? 'Someone'}: ${body}`, { screen: 'GroupChat', groupId, groupName: group?.name });
+            }
+          }
+        }
+      } catch { /* non-blocking */ }
 
       return res.status(201).json(formatMsg(message));
     }
@@ -85,6 +127,15 @@ export async function sendMessage(req: AuthRequest, res: Response) {
       where: { chat_id: chat.id, user_id: receiverId },
       data: { unread_count: { increment: 1 } },
     });
+
+    // FCM push for DM message when app is closed
+    try {
+      const recipient = await prisma.user.findUnique({ where: { id: receiverId }, select: { push_token: true } });
+      if (recipient?.push_token) {
+        const dmBody = content.length > 60 ? content.slice(0, 60) + '...' : content;
+        sendExpoPushNotification(recipient.push_token, message.sender?.name ?? 'New Message', dmBody, { screen: 'Chat', chatId: chat.id });
+      }
+    } catch { /* non-blocking */ }
 
     res.status(201).json(formatMsg(message));
   } catch (err: any) {

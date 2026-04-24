@@ -1,10 +1,30 @@
-import { Router, Response } from 'express';
+import { Router, Response, RequestHandler } from 'express';
 import prisma from '../utils/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { sendExpoPushNotification } from '../utils/push';
 
 const router = Router();
-router.use(authenticate);
+
+// ── Public routes (no auth required) ─────────────────────────────────────────
+
+/**
+ * GET /config — returns the credit configuration (signup bonus, referral reward, etc.)
+ */
+router.get('/config', async (_req, res: Response) => {
+  try {
+    const config = await prisma.creditConfig.findFirst();
+    res.json({
+      signup_bonus: config?.signup_bonus ?? 0,
+      referral_reward: config?.referral_reward ?? 300,
+    });
+  } catch (err) {
+    console.error('[credits/config]', err);
+    res.status(500).json({ error: 'Failed to fetch config' });
+  }
+});
+
+// ── Authenticated routes ─────────────────────────────────────────────────────
+router.use(authenticate as RequestHandler);
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -15,6 +35,15 @@ function randomAlphaNumeric(len: number): string {
     out += chars[Math.floor(Math.random() * chars.length)];
   }
   return out;
+}
+
+async function generateUniqueReferralCode(): Promise<string> {
+  for (let i = 0; i < 20; i++) {
+    const code = randomAlphaNumeric(6);
+    const exists = await prisma.user.findFirst({ where: { referral_code: code } });
+    if (!exists) return code;
+  }
+  return randomAlphaNumeric(6) + Date.now().toString(36).slice(-2).toUpperCase();
 }
 
 function generateTransactionId(): string {
@@ -29,7 +58,7 @@ function daysRemaining(expiry: Date): number {
 
 // ── GET /balance ──────────────────────────────────────────────────────────────
 
-router.get('/balance', async (req: AuthRequest, res: Response): Promise<void> => {
+router.get('/balance', (async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user!.userId },
@@ -41,7 +70,7 @@ router.get('/balance', async (req: AuthRequest, res: Response): Promise<void> =>
     if (user.credits_expiry_date && user.credits_expiry_date < now) {
       await prisma.user.update({
         where: { id: req.user!.userId },
-        data: { credits: BigInt(0) },
+        data: { credits: BigInt(0), credits_expiry_date: null },
       });
       res.json({ credits: 0, creditsExpiryDate: user.credits_expiry_date, expired: true });
       return;
@@ -57,11 +86,11 @@ router.get('/balance', async (req: AuthRequest, res: Response): Promise<void> =>
     console.error('[credits/balance]', err);
     res.status(500).json({ error: 'Failed to fetch balance' });
   }
-});
+}) as unknown as RequestHandler);
 
 // ── GET /transactions ─────────────────────────────────────────────────────────
 
-router.get('/transactions', async (req: AuthRequest, res: Response): Promise<void> => {
+router.get('/transactions', (async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
     const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '20'), 10)));
@@ -103,11 +132,11 @@ router.get('/transactions', async (req: AuthRequest, res: Response): Promise<voi
     console.error('[credits/transactions]', err);
     res.status(500).json({ error: 'Failed to fetch transactions' });
   }
-});
+}) as unknown as RequestHandler);
 
 // ── GET /history ──────────────────────────────────────────────────────────────
 
-router.get('/history', async (req: AuthRequest, res: Response): Promise<void> => {
+router.get('/history', (async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user!.userId;
     const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '100'), 10)));
@@ -179,11 +208,11 @@ router.get('/history', async (req: AuthRequest, res: Response): Promise<void> =>
     console.error('[credits/history]', err);
     res.status(500).json({ error: 'Failed to fetch history' });
   }
-});
+}) as unknown as RequestHandler);
 
 // ── POST /search-users ────────────────────────────────────────────────────────
 
-router.post('/search-users', async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/search-users', (async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { phone } = req.body;
     if (!phone || typeof phone !== 'string') {
@@ -212,11 +241,11 @@ router.post('/search-users', async (req: AuthRequest, res: Response): Promise<vo
     console.error('[credits/search-users]', err);
     res.status(500).json({ error: 'Search failed' });
   }
-});
+}) as unknown as RequestHandler);
 
 // ── POST /transfer ────────────────────────────────────────────────────────────
 
-router.post('/transfer', async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/transfer', (async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { recipientId, amount, note } = req.body;
     const senderId = req.user!.userId;
@@ -303,6 +332,205 @@ router.post('/transfer', async (req: AuthRequest, res: Response): Promise<void> 
     console.error('[credits/transfer]', err);
     res.status(500).json({ error: 'Transfer failed' });
   }
-});
+}) as unknown as RequestHandler);
+
+// ── Referral stats ───────────────────────────────────────────────────────────
+
+/**
+ * GET /referral-stats — returns the current user's referral code, total referrals, and credits earned from referrals
+ * Auto-generates a referral code for existing users who don't have one.
+ */
+router.get('/referral-stats', (async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    let user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { referral_code: true },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    // Auto-generate referral code for existing users who don't have one
+    if (!user.referral_code) {
+      const newCode = await generateUniqueReferralCode();
+      await prisma.user.update({
+        where: { id: userId },
+        data: { referral_code: newCode },
+      });
+      user = { referral_code: newCode };
+    }
+
+    const [totalReferrals, creditsEarned] = await Promise.all([
+      prisma.referral.count({ where: { referrer_id: userId } }),
+      prisma.transaction.aggregate({
+        where: { to_user_id: userId, type: 'referral_bonus', status: 'completed' },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    res.json({
+      referralCode: user.referral_code,
+      totalReferrals,
+      totalCreditsEarned: creditsEarned._sum.amount ?? 0,
+    });
+  } catch (err) {
+    console.error('[credits/referral-stats]', err);
+    res.status(500).json({ error: 'Failed to fetch referral stats' });
+  }
+}) as unknown as RequestHandler);
+
+/**
+ * GET /referral-history — returns paginated list of individual referrals for the current user
+ */
+router.get('/referral-history', (async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || '20'), 10)));
+
+    const [referrals, total] = await Promise.all([
+      prisma.referral.findMany({
+        where: { referrer_id: userId },
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: {
+          referred: {
+            select: { id: true, name: true, profile_picture: true, created_at: true },
+          },
+        },
+      }),
+      prisma.referral.count({ where: { referrer_id: userId } }),
+    ]);
+
+    // For each referral, find the bonus transaction amount
+    const referralData = await Promise.all(
+      referrals.map(async (r) => {
+        const bonusTx = await prisma.transaction.findFirst({
+          where: {
+            to_user_id: userId,
+            from_user_id: r.referred_id,
+            type: 'referral_bonus',
+            status: 'completed',
+          },
+          select: { amount: true },
+        });
+        return {
+          id: r.id,
+          referredUser: {
+            id: r.referred.id,
+            name: r.referred.name,
+            profilePicture: r.referred.profile_picture,
+          },
+          status: r.status,
+          rewardGiven: r.reward_given,
+          creditsEarned: bonusTx?.amount ?? 0,
+          createdAt: r.created_at,
+        };
+      })
+    );
+
+    res.json({
+      referrals: referralData,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      totalReferrals: total,
+    });
+  } catch (err) {
+    console.error('[credits/referral-history]', err);
+    res.status(500).json({ error: 'Failed to fetch referral history' });
+  }
+}) as unknown as RequestHandler);
+
+/**
+ * GET /earnings-history — returns paginated list of referral bonus transactions
+ */
+router.get('/earnings-history', (async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || '20'), 10)));
+
+    const [transactions, total, totalEarned] = await Promise.all([
+      prisma.transaction.findMany({
+        where: { to_user_id: userId, type: 'referral_bonus', status: 'completed' },
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          amount: true,
+          description: true,
+          created_at: true,
+          transaction_id: true,
+        },
+      }),
+      prisma.transaction.count({
+        where: { to_user_id: userId, type: 'referral_bonus', status: 'completed' },
+      }),
+      prisma.transaction.aggregate({
+        where: { to_user_id: userId, type: 'referral_bonus', status: 'completed' },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    res.json({
+      earnings: transactions.map((tx) => ({
+        id: tx.id,
+        amount: tx.amount,
+        description: tx.description,
+        transactionId: tx.transaction_id,
+        createdAt: tx.created_at,
+      })),
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      totalEarnings: totalEarned._sum.amount ?? 0,
+      totalTransactions: total,
+    });
+  } catch (err) {
+    console.error('[credits/earnings-history]', err);
+    res.status(500).json({ error: 'Failed to fetch earnings history' });
+  }
+}) as unknown as RequestHandler);
+
+/**
+ * PUT /config — admin-only: upsert credit configuration
+ * Protected by x-admin-key header
+ */
+router.put('/config', (async (req: AuthRequest, res: Response) => {
+  try {
+    const adminKey = req.headers['x-admin-key'];
+    if (!adminKey || adminKey !== process.env.ADMIN_API_KEY) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
+    const { signup_bonus, referral_reward } = req.body;
+    const existing = await prisma.creditConfig.findFirst();
+
+    const config = existing
+      ? await prisma.creditConfig.update({
+          where: { id: existing.id },
+          data: {
+            ...(signup_bonus !== undefined && { signup_bonus: Number(signup_bonus) }),
+            ...(referral_reward !== undefined && { referral_reward: Number(referral_reward) }),
+          },
+        })
+      : await prisma.creditConfig.create({
+          data: {
+            signup_bonus: Number(signup_bonus ?? 0),
+            referral_reward: Number(referral_reward ?? 300),
+          },
+        });
+
+    res.json(config);
+  } catch (err) {
+    console.error('[credits/config PUT]', err);
+    res.status(500).json({ error: 'Failed to update config' });
+  }
+}) as unknown as RequestHandler);
 
 export default router;

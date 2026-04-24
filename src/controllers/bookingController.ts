@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth';
 import { paramInt, queryInt } from '../utils/params';
+import { getIO } from '../services/socketService';
+import { sendExpoPushNotification } from '../utils/push';
 
 export async function listMyBookings(req: AuthRequest, res: Response): Promise<void> {
   const page = queryInt(req.query.page, 1);
@@ -145,6 +147,32 @@ export async function createBooking(req: AuthRequest, res: Response): Promise<vo
     },
     include: { business: { select: { id: true, company_name: true, logo_url: true } } },
   });
+
+  // Notify business owner in real-time
+  try {
+    // Resolve owner user_id from either the business card or the promotion
+    let ownerUserId: number | null = null;
+    if (resolvedBusinessId) {
+      const card = await prisma.businessCard.findUnique({ where: { id: resolvedBusinessId }, select: { user_id: true } });
+      ownerUserId = card?.user_id ?? null;
+    }
+    if (!ownerUserId && resolvedPromotionId) {
+      const promo = await prisma.businessPromotion.findUnique({ where: { id: resolvedPromotionId }, select: { user_id: true } });
+      ownerUserId = promo?.user_id ?? null;
+    }
+    if (ownerUserId) {
+      const businessOwner = await prisma.user.findUnique({ where: { id: ownerUserId }, select: { id: true, push_token: true } });
+      if (businessOwner) {
+        const io = getIO();
+        const payload = { type: 'booking:created', bookingId: booking.id, businessName: booking.business_name, customerName: customer_name || 'A customer' };
+        if (io) io.to(`user:${businessOwner.id}`).emit('booking:created', payload);
+        if (businessOwner.push_token) {
+          sendExpoPushNotification(businessOwner.push_token, 'New Booking', `${customer_name || 'A customer'} booked ${booking.business_name}`, { screen: 'Bookings' });
+        }
+      }
+    }
+  } catch { /* non-blocking */ }
+
   res.status(201).json(booking);
 }
 
@@ -176,5 +204,22 @@ export async function updateBookingStatus(req: AuthRequest, res: Response): Prom
   }
 
   const updated = await prisma.booking.update({ where: { id }, data: { status } });
+
+  // Notify the other party about the status change
+  try {
+    const notifyUserId = isBusinessOwner ? booking.user_id : booking.business?.user_id;
+    if (notifyUserId) {
+      const notifyUser = await prisma.user.findUnique({ where: { id: notifyUserId }, select: { id: true, push_token: true } });
+      if (notifyUser) {
+        const io = getIO();
+        const payload = { type: 'booking:updated', bookingId: id, status, businessName: (booking as any).business_name };
+        if (io) io.to(`user:${notifyUser.id}`).emit('booking:updated', payload);
+        if (notifyUser.push_token) {
+          sendExpoPushNotification(notifyUser.push_token, 'Booking Updated', `Your booking has been ${status}`, { screen: 'Bookings' });
+        }
+      }
+    }
+  } catch { /* non-blocking */ }
+
   res.json(updated);
 }

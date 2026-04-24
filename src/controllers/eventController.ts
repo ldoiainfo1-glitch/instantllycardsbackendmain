@@ -9,6 +9,8 @@ import {
   getRazorpayPublicKey,
   verifyRazorpaySignature,
 } from '../services/razorpayService';
+import { getIO } from '../services/socketService';
+import { sendExpoPushNotification } from '../utils/push';
 
 function parseTicketCount(input: unknown): number {
   const count = input === undefined || input === null ? 1 : parseInt(String(input), 10);
@@ -324,6 +326,24 @@ export async function registerForEvent(req: AuthRequest, res: Response): Promise
   ]);
 
   console.log('[registerForEvent] SUCCESS — regId:', registration.id, 'qrCode:', qrCode, 'paymentStatus:', paymentStatus);
+
+  // Notify event organizer in real-time
+  try {
+    const eventWithBiz = await prisma.event.findUnique({ where: { id: eventId }, include: { business: { select: { user_id: true } } } });
+    if (eventWithBiz && eventWithBiz.business) {
+      const organizer = await prisma.user.findUnique({ where: { id: eventWithBiz.business.user_id }, select: { id: true, push_token: true } });
+      const attendee = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { name: true } });
+      if (organizer && organizer.id !== req.user!.userId) {
+        const io = getIO();
+        const payload = { type: 'event:registered', eventId, eventTitle: event.title, attendeeName: attendee?.name ?? 'Someone', ticketCount: count };
+        if (io) io.to(`user:${organizer.id}`).emit('event:registered', payload);
+        if (organizer.push_token) {
+          sendExpoPushNotification(organizer.push_token, 'New Event Registration', `${attendee?.name ?? 'Someone'} registered for "${event.title}"`, { screen: 'Events' });
+        }
+      }
+    }
+  } catch { /* non-blocking */ }
+
   res.status(201).json({ ...registration, qr_code: qrCode });
 }
 

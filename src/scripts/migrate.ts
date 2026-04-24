@@ -1045,11 +1045,11 @@ const migrateVouchers = async (db: any, collections: Set<string>, options: Migra
     const createdByAdmin = getMappedId(userIdMap, idToString(doc.createdByAdmin));
     const transferredFrom = getMappedId(userIdMap, idToString(doc.transferredFrom));
     const mappedBusinessId = getMappedId(cardIdMap, idToString(doc.businessId));
-
-    let mappedPromotionId = getMappedId(
-      promotionIdMap,
-      idToString(doc.businessPromotionId || doc.promotionId || doc.businessPromotion || doc.promotion)
+    const promotionLegacyId = idToString(
+      doc.businessPromotionId || doc.promotionId || doc.businessPromotion || doc.promotion
     );
+
+    let mappedPromotionId = getMappedId(promotionIdMap, promotionLegacyId);
 
     if (!mappedPromotionId && mappedBusinessId) {
       const promo = await prisma.businessPromotion.findFirst({
@@ -1062,14 +1062,15 @@ const migrateVouchers = async (db: any, collections: Set<string>, options: Migra
 
     if (!mappedPromotionId) {
       auditLog('voucher_missing_promotion', {
-        legacy_id: legacyId,
+        voucher_id: legacyId,
+        promotion_legacy_id: promotionLegacyId,
         missing_business_id: mappedBusinessId ?? null,
       });
       log.warn(`Voucher ${legacyId} missing mapped business promotion. Skipping.`);
       continue;
     }
 
-    const data = {
+    const data: Prisma.VoucherUncheckedCreateInput = {
       legacy_id: legacyId ?? undefined,
       business_id: mappedBusinessId,
       business_promotion_id: mappedPromotionId,
@@ -1113,7 +1114,7 @@ const migrateVouchers = async (db: any, collections: Set<string>, options: Migra
       source: doc.source || undefined,
       transferred_from_id: transferredFrom,
       transferred_at: toDate(doc.transferredAt),
-    } as const;
+    };
 
     if (options.dryRun) {
       count += 1;

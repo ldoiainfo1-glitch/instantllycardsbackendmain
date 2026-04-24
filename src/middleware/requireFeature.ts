@@ -21,6 +21,9 @@ function readPromotionId(req: Request, options?: RequireFeatureOptions): number 
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+/**
+ * Middleware factory: require a specific tier feature.
+ */
 export function requireFeature(feature: Feature, options?: RequireFeatureOptions): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const authReq = req as AuthRequest;
@@ -50,8 +53,6 @@ export function requireFeature(feature: Feature, options?: RequireFeatureOptions
         select: { tier: true, status: true },
       });
 
-      console.log(`[requireFeature] promo-scoped lookup:`, JSON.stringify(promo));
-
       if (!promo) {
         console.log(`[requireFeature] DENIED: promotion ${promotionId} not found for user ${authReq.user.userId}`);
         res.status(404).json({ error: 'Promotion not found' });
@@ -60,17 +61,14 @@ export function requireFeature(feature: Feature, options?: RequireFeatureOptions
 
       tier = promo.status === 'active' ? (promo.tier ?? 'free') : 'free';
     } else {
-      // Fallback: user's best active promotion (backward-compatible)
       const promo = await prisma.businessPromotion.findFirst({
         where: {
-          user_id: authReq.user.userId,
+          user_id: authReq.user!.userId,
           status: 'active',
         },
         orderBy: { visibility_priority_score: 'desc' },
         select: { tier: true },
       });
-
-      console.log(`[requireFeature] fallback lookup (best tier):`, JSON.stringify(promo));
 
       tier = promo?.tier ?? 'free';
     }

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, RequestHandler } from 'express';
 import { body } from 'express-validator';
 import rateLimit from 'express-rate-limit';
 import { validate } from '../middleware/validate';
@@ -17,8 +17,8 @@ import {
 } from '../controllers/businessCardController';
 
 const router = Router();
+const h = (fn: Function) => fn as RequestHandler;
 
-// Rate limit card creation: 5 per hour per IP (bypass in test)
 const cardCreateLimit =
   process.env.NODE_ENV === 'test'
     ? (_req: any, _res: any, next: any) => next()
@@ -30,10 +30,10 @@ const cardCreateLimit =
         legacyHeaders: false,
       });
 
-router.get('/', listCards);
-router.get('/my', authenticate, getMyCards);
-router.get('/shared', authenticate, getSharedCards);
-router.get('/:id', getCard);
+router.get('/', h(listCards));
+router.get('/my', authenticate, h(getMyCards));
+router.get('/shared', authenticate, h(getSharedCards));
+router.get('/:id', h(getCard));
 
 router.post(
   '/',
@@ -41,7 +41,7 @@ router.post(
   cardCreateLimit,
   [body('full_name').notEmpty().withMessage('full_name required')],
   validate,
-  createCard
+  h(createCard)
 );
 
 router.put(
@@ -56,20 +56,19 @@ router.put(
     body('company_country_code').optional().isString().withMessage('company_country_code must be a string'),
   ],
   validate,
-  updateCard
+  h(updateCard)
 );
 
-router.delete('/:id', authenticate, deleteCard);
+router.delete('/:id', authenticate, h(deleteCard));
 
 router.post(
   '/share',
   authenticate,
   [body('card_id').isInt(), body('recipient_user_id').isInt()],
   validate,
-  shareCard
+  h(shareCard)
 );
 
-// Rate limit bulk send: 10 per hour per user
 const bulkSendLimit =
   process.env.NODE_ENV === 'test'
     ? (_req: any, _res: any, next: any) => next()
@@ -93,7 +92,7 @@ if (FEATURES.BULK_SEND) {
       body('level').isIn(['zone', 'state', 'division', 'pincode', 'village']).withMessage('Invalid level'),
     ],
     validate,
-    bulkSendCard
+    h(bulkSendCard)
   );
 }
 

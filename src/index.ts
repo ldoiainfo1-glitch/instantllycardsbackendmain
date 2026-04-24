@@ -19,15 +19,24 @@ import leadRoutes from './routes/leads';
 import eventRoutes from './routes/events';
 import systemRoutes from './routes/system';
 import creditRoutes from './routes/credits';
+import adminAuthRoutes from './routes/adminAuth';
+import feedbackRoutes from './routes/feedback';
+import mlmRoutes from './routes/mlm';
 import { setIo } from './utils/socket';
 import { startScheduledJobs } from './jobs/scheduler';
 import chatRoutes from './routes/chats';
 import groupRoutes from './routes/groups';
 import messageRoutes from './routes/messages';
+import notificationRoutes from './routes/notifications';
 import { initSocketService } from './services/socketService';
 
 const app = express();
 const httpServer = createServer(app);
+
+// Trust the first proxy (Nginx on EC2) so req.ip reflects the real client IP.
+// Without this, express-rate-limit sees every request as coming from 127.0.0.1
+// and rate-limits ALL users together.
+app.set('trust proxy', 1);
 
 // Socket.IO
 const io = new Server(httpServer, {
@@ -116,6 +125,9 @@ app.get('/invite/:code', async (req, res) => {
 
 // API Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/admin-auth', adminAuthRoutes);
+app.use('/api/feedback', feedbackRoutes);
+app.use('/api/mlm', mlmRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/cards', businessCardRoutes);
@@ -133,6 +145,7 @@ app.use('/api/credits', creditRoutes);
 app.use('/api/chats', chatRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Socket.IO — real-time chat with auth
 initSocketService(io);

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, RequestHandler } from 'express';
 import { body } from 'express-validator';
 import { validate } from '../middleware/validate';
 import { authenticate } from '../middleware/auth';
@@ -10,9 +10,10 @@ import {
 } from '../controllers/leadController';
 
 const router = Router();
+const h = (fn: Function) => fn as RequestHandler;
 
-router.get('/business/:businessId', authenticate, listBusinessLeads);
-router.get('/promotion/:promotionId', authenticate, listPromotionLeads);
+router.get('/business/:businessId', authenticate, h(listBusinessLeads));
+router.get('/promotion/:promotionId', authenticate, h(listPromotionLeads));
 router.post(
   '/',
   [
@@ -21,14 +22,14 @@ router.post(
     body('customer_name').notEmpty(),
   ],
   validate,
-  createLead
+  h(createLead)
 );
 router.patch(
   '/:id/status',
   authenticate,
   [body('status').notEmpty()],
   validate,
-  updateLeadStatus
+  h(updateLeadStatus)
 );
 
 export default router;
