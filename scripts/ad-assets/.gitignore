@@ -1,0 +1,8 @@
+# Ignore the actual images — they're admin uploads, not source code
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.gif
+!README.md
+!.gitignore
