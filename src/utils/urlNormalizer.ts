@@ -7,8 +7,9 @@
  * 3. Local paths: /api/ads/image/{id}/bottom
  */
 
-const API_BASE_URL = process.env.API_BASE_URL || 'https://api.instantllycards.com';
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const API_BASE_URL =
+  process.env.API_BASE_URL || "https://api.instantllycards.com";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 /**
  * Check if URL is already absolute
@@ -22,13 +23,20 @@ function isAbsoluteUrl(url: string | null | undefined): boolean {
  * Normalize a single creative URL
  * Converts paths to full URLs, handles edge cases
  */
-export function normalizeCreativeUrl(url: string | null | undefined): string | null {
+export function normalizeCreativeUrl(
+  url: string | null | undefined,
+): string | null {
   if (!url) return null;
 
-  // Fix inconsistent URLs: /ads/{id} → /api/ads/image/{id}
-  if (url.includes('/ads/') && !url.includes('/api/ads')) {
+  // Fix inconsistent LOCAL paths only: /ads/{id} → /api/ads/image/{id}
+  // Do NOT touch absolute CloudFront/CDN/S3 URLs — they already have the right path
+  if (
+    !isAbsoluteUrl(url) &&
+    url.includes("/ads/") &&
+    !url.includes("/api/ads")
+  ) {
     // Pattern: /ads/6908840e.../bottom → /api/ads/image/6908840e.../bottom
-    url = url.replace(/\/ads\//, '/api/ads/image/');
+    url = url.replace(/\/ads\//, "/api/ads/image/");
   }
 
   // Already absolute URL
@@ -37,7 +45,7 @@ export function normalizeCreativeUrl(url: string | null | undefined): string | n
   }
 
   // Local path → convert to full URL
-  if (url.startsWith('/')) {
+  if (url.startsWith("/")) {
     return `${API_BASE_URL}${url}`;
   }
 
@@ -49,7 +57,7 @@ export function normalizeCreativeUrl(url: string | null | undefined): string | n
  * Normalize creative_urls array (from migration, may have nulls)
  */
 export function normalizeCreativeUrls(
-  urls: (string | null | undefined)[] | null | undefined
+  urls: (string | null | undefined)[] | null | undefined,
 ): string[] {
   if (!urls || urls.length === 0) return [];
 

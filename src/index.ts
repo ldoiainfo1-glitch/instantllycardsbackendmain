@@ -1,34 +1,34 @@
-import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
-import { createServer } from 'http';
-import { Server } from 'socket.io';
+import "dotenv/config";
+import express from "express";
+import cors from "cors";
+import { createServer } from "http";
+import { Server } from "socket.io";
 
-import authRoutes from './routes/auth';
-import userRoutes from './routes/users';
-import categoryRoutes from './routes/categories';
-import businessCardRoutes from './routes/businessCards';
-import promotionRoutes from './routes/promotions';
-import voucherRoutes from './routes/vouchers';
-import adRoutes from './routes/ads';
-import reviewRoutes from './routes/reviews';
-import adminRoutes from './routes/admin';
-import uploadRoutes from './routes/uploads';
-import bookingRoutes from './routes/bookings';
-import leadRoutes from './routes/leads';
-import eventRoutes from './routes/events';
-import systemRoutes from './routes/system';
-import creditRoutes from './routes/credits';
-import adminAuthRoutes from './routes/adminAuth';
-import feedbackRoutes from './routes/feedback';
-import mlmRoutes from './routes/mlm';
-import { setIo } from './utils/socket';
-import { startScheduledJobs } from './jobs/scheduler';
-import chatRoutes from './routes/chats';
-import groupRoutes from './routes/groups';
-import messageRoutes from './routes/messages';
-import notificationRoutes from './routes/notifications';
-import { initSocketService } from './services/socketService';
+import authRoutes from "./routes/auth";
+import userRoutes from "./routes/users";
+import categoryRoutes from "./routes/categories";
+import businessCardRoutes from "./routes/businessCards";
+import promotionRoutes from "./routes/promotions";
+import voucherRoutes from "./routes/vouchers";
+import adRoutes from "./routes/ads";
+import reviewRoutes from "./routes/reviews";
+import adminRoutes from "./routes/admin";
+import uploadRoutes from "./routes/uploads";
+import bookingRoutes from "./routes/bookings";
+import leadRoutes from "./routes/leads";
+import eventRoutes from "./routes/events";
+import systemRoutes from "./routes/system";
+import creditRoutes from "./routes/credits";
+import adminAuthRoutes from "./routes/adminAuth";
+import feedbackRoutes from "./routes/feedback";
+import mlmRoutes from "./routes/mlm";
+import { setIo } from "./utils/socket";
+import { startScheduledJobs } from "./jobs/scheduler";
+import chatRoutes from "./routes/chats";
+import groupRoutes from "./routes/groups";
+import messageRoutes from "./routes/messages";
+import notificationRoutes from "./routes/notifications";
+import { initSocketService } from "./services/socketService";
 
 const app = express();
 const httpServer = createServer(app);
@@ -36,37 +36,47 @@ const httpServer = createServer(app);
 // Trust the first proxy (Nginx on EC2) so req.ip reflects the real client IP.
 // Without this, express-rate-limit sees every request as coming from 127.0.0.1
 // and rate-limits ALL users together.
-app.set('trust proxy', 1);
+app.set("trust proxy", 1);
 
 // Socket.IO
 const io = new Server(httpServer, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  cors: { origin: "*", methods: ["GET", "POST"] },
 });
 setIo(io);
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ limit: "10mb", extended: true }));
+
+// Serve static ad images from public/ads/
+// Path /api/ads/ is safe — the URL normalizer skips paths already containing /api/ads
+import path from "path";
+app.use(
+  "/api/ads",
+  express.static(path.join(__dirname, "..", "public", "ads")),
+);
 
 // Health check
-app.get('/', (_req, res) => res.json({ message: 'Instantlly API running', version: '2.0.0' }));
+app.get("/", (_req, res) =>
+  res.json({ message: "Instantlly API running", version: "2.0.0" }),
+);
 
 // ─── Public group invite redirect ────────────────────────────────────────────
 // /invite/:code  — served without auth; handles:
 //   Android: intent URL → opens app if installed, else Play Store
 //   Other:   shows a simple landing page with download link
-import prismaInvite from './prismaClient';
-app.get('/invite/:code', async (req, res) => {
-  const code = (req.params.code || '').toUpperCase().trim();
-  const PACKAGE = 'com.instantllycards.www.twa';
+import prismaInvite from "./prismaClient";
+app.get("/invite/:code", async (req, res) => {
+  const code = (req.params.code || "").toUpperCase().trim();
+  const PACKAGE = "com.instantllycards.www.twa";
   // referrer=ic_join_CODE is read by expo-application on first launch after install
   const PLAY_STORE = `https://play.google.com/store/apps/details?id=${PACKAGE}&referrer=${encodeURIComponent(`ic_join_${code}`)}`;
   const APP_SCHEME = `instantllycards://join?code=${code}`;
   // Android intent URL — opens app if installed, otherwise falls back to Play Store
   const INTENT_URL = `intent://join?code=${code}#Intent;scheme=instantllycards;package=${PACKAGE};S.browser_fallback_url=${encodeURIComponent(PLAY_STORE)};end`;
 
-  let groupName = 'an Instantlly Cards group';
+  let groupName = "an Instantlly Cards group";
   let memberCount = 0;
   try {
     const g = await prismaInvite.group.findUnique({
@@ -77,7 +87,9 @@ app.get('/invite/:code', async (req, res) => {
       groupName = g.name;
       memberCount = g._count.members;
     }
-  } catch { /* non-blocking */ }
+  } catch {
+    /* non-blocking */
+  }
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -103,7 +115,7 @@ app.get('/invite/:code', async (req, res) => {
 <div class="card">
   <div class="icon">&#128101;</div>
   <h1>You're invited to join</h1>
-  <p class="sub">${groupName}${memberCount > 0 ? ` &middot; ${memberCount} members` : ''}</p>
+  <p class="sub">${groupName}${memberCount > 0 ? ` &middot; ${memberCount} members` : ""}</p>
   <div class="code">${code}</div>
   <a class="btn btn-primary" id="openBtn" href="${APP_SCHEME}">Open in Instantlly Cards</a>
   <a class="btn btn-secondary" href="${PLAY_STORE}">Download App</a>
@@ -119,33 +131,33 @@ app.get('/invite/:code', async (req, res) => {
 </body>
 </html>`;
 
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(html);
 });
 
 // API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/admin-auth', adminAuthRoutes);
-app.use('/api/feedback', feedbackRoutes);
-app.use('/api/mlm', mlmRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/categories', categoryRoutes);
-app.use('/api/cards', businessCardRoutes);
-app.use('/api/promotions', promotionRoutes);
-app.use('/api/vouchers', voucherRoutes);
-app.use('/api/ads', adRoutes);
-app.use('/api/reviews', reviewRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/uploads', uploadRoutes);
-app.use('/api/bookings', bookingRoutes);
-app.use('/api/leads', leadRoutes);
-app.use('/api/events', eventRoutes);
-app.use('/api/system', systemRoutes);
-app.use('/api/credits', creditRoutes);
-app.use('/api/chats', chatRoutes);
-app.use('/api/groups', groupRoutes);
-app.use('/api/messages', messageRoutes);
-app.use('/api/notifications', notificationRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/admin-auth", adminAuthRoutes);
+app.use("/api/feedback", feedbackRoutes);
+app.use("/api/mlm", mlmRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/categories", categoryRoutes);
+app.use("/api/cards", businessCardRoutes);
+app.use("/api/promotions", promotionRoutes);
+app.use("/api/vouchers", voucherRoutes);
+app.use("/api/ads", adRoutes);
+app.use("/api/reviews", reviewRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/uploads", uploadRoutes);
+app.use("/api/bookings", bookingRoutes);
+app.use("/api/leads", leadRoutes);
+app.use("/api/events", eventRoutes);
+app.use("/api/system", systemRoutes);
+app.use("/api/credits", creditRoutes);
+app.use("/api/chats", chatRoutes);
+app.use("/api/groups", groupRoutes);
+app.use("/api/messages", messageRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // Socket.IO — real-time chat with auth
 initSocketService(io);
