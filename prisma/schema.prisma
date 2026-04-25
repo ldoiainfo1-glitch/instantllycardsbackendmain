@@ -847,13 +847,14 @@ model Group {
 }
 
 model GroupMember {
-  id         Int      @id @default(autoincrement())
-  group_id   Int
-  user_id    Int
-  role       String   @default("member")
-  is_muted   Boolean  @default(false)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  id           Int      @id @default(autoincrement())
+  group_id     Int
+  user_id      Int
+  role         String   @default("member")
+  is_muted     Boolean  @default(false)
+  unread_count Int      @default(0)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
   group      Group    @relation("GroupMembers", fields: [group_id], references: [id], onDelete: Cascade)
   user       User     @relation("GroupMemberUser", fields: [user_id], references: [id], onDelete: Cascade)
 
