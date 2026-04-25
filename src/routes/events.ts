@@ -28,7 +28,7 @@ router.post(
   authenticate,
   requireRole('business', 'admin'),
   [
-    body('business_id').notEmpty().toInt(),
+    body('business_promotion_id').notEmpty().toInt(),
     body('title').notEmpty(),
     body('date').notEmpty(),
     body('time').notEmpty(),

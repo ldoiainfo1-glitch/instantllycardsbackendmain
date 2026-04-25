@@ -80,17 +80,25 @@ export async function getEvent(req: Request, res: Response): Promise<void> {
 export async function listMyEvents(req: AuthRequest, res: Response): Promise<void> {
   console.log('[listMyEvents] userId:', req.user!.userId);
   try {
-    const cards = await prisma.businessCard.findMany({
+    const promotions = await prisma.businessPromotion.findMany({
       where: { user_id: req.user!.userId },
       select: { id: true },
     });
-    const cardIds = cards.map((c) => c.id);
-    console.log('[listMyEvents] businessCardIds:', cardIds);
+    const promotionIds = promotions.map((p) => p.id);
+    console.log('[listMyEvents] businessPromotionIds:', promotionIds);
+
+    if (promotionIds.length === 0) {
+      res.json([]);
+      return;
+    }
 
     const events = await prisma.event.findMany({
-      where: { business_id: { in: cardIds } },
+      where: { business_promotion_id: { in: promotionIds } },
       orderBy: { date: 'desc' },
-      include: { _count: { select: { registrations: true } } },
+      include: {
+        _count: { select: { registrations: true } },
+        business_promotion: { select: { id: true, business_name: true, business_card_id: true } },
+      },
     });
     console.log('[listMyEvents] returned', events.length, 'events');
     res.json(events);
@@ -102,8 +110,8 @@ export async function listMyEvents(req: AuthRequest, res: Response): Promise<voi
 
 export async function createEvent(req: AuthRequest, res: Response): Promise<void> {
   const {
-    business_id,
     business_promotion_id,
+    promotionId,
     title,
     description,
     date,
@@ -117,43 +125,35 @@ export async function createEvent(req: AuthRequest, res: Response): Promise<void
   console.log('[createEvent] body:', JSON.stringify(req.body));
   console.log('[createEvent] user:', req.user?.userId, 'roles:', req.user?.roles);
 
-  const businessId = parseInt(business_id, 10);
-  if (!businessId || !title || !date || !time) {
-    console.log('[createEvent] validation failed — businessId:', businessId, 'title:', title, 'date:', date, 'time:', time);
-    res.status(400).json({ error: 'business_id, title, date, and time are required' }); return;
+  const rawPromotionId = business_promotion_id ?? promotionId;
+  const promotionIdNum = rawPromotionId ? parseInt(String(rawPromotionId), 10) : NaN;
+  if (!promotionIdNum || !title || !date || !time) {
+    console.log('[createEvent] validation failed — promotionId:', promotionIdNum, 'title:', title, 'date:', date, 'time:', time);
+    res.status(400).json({ error: 'business_promotion_id, title, date, and time are required' }); return;
   }
 
-  const card = await prisma.businessCard.findUnique({ where: { id: businessId } });
-  if (!card) {
-    console.log('[createEvent] business card not found for id:', businessId);
-    res.status(404).json({ error: 'Business not found' }); return;
+  const promotion = await prisma.businessPromotion.findUnique({
+    where: { id: promotionIdNum },
+    select: { id: true, user_id: true, status: true, business_card_id: true, business_name: true },
+  });
+  if (!promotion) {
+    console.log('[createEvent] promotion not found for id:', promotionIdNum);
+    res.status(404).json({ error: 'Promotion not found' }); return;
   }
-  if (card.user_id !== req.user!.userId && !req.user!.roles.includes('admin')) {
-    console.log('[createEvent] forbidden — card.user_id:', card.user_id, 'req.user.userId:', req.user!.userId);
+  if (promotion.user_id !== req.user!.userId && !req.user!.roles.includes('admin')) {
+    console.log('[createEvent] forbidden — promotion.user_id:', promotion.user_id, 'req.user.userId:', req.user!.userId);
     res.status(403).json({ error: 'Forbidden' }); return;
   }
-
-  // Event requires a business_promotion_id. Prefer explicit body param;
-  // fall back to the most recent promotion linked to this business card.
-  let promotionId: number | null = business_promotion_id ? parseInt(business_promotion_id, 10) : null;
-  if (!promotionId) {
-    const promo = await prisma.businessPromotion.findFirst({
-      where: { business_card_id: businessId },
-      orderBy: { id: 'desc' },
-      select: { id: true },
-    });
-    promotionId = promo?.id ?? null;
-  }
-  if (!promotionId) {
-    console.log('[createEvent] no business_promotion_id and no promotion found for business:', businessId);
-    res.status(400).json({ error: 'business_promotion_id is required' }); return;
+  if (promotion.status !== 'active' && promotion.status !== 'draft') {
+    console.log('[createEvent] promotion not active:', promotion.status);
+    res.status(409).json({ error: 'Promotion must be active to create events' }); return;
   }
 
   try {
     const event = await prisma.event.create({
       data: {
-        business_id: businessId,
-        business_promotion_id: promotionId,
+        business_promotion_id: promotion.id,
+        business_id: promotion.business_card_id ?? null,
         title,
         description: description || null,
         date: new Date(date),
@@ -164,7 +164,10 @@ export async function createEvent(req: AuthRequest, res: Response): Promise<void
         max_attendees: max_attendees ? parseInt(max_attendees, 10) : null,
         status: 'active',
       },
-      include: { business: { select: { id: true, company_name: true } } },
+      include: {
+        business_promotion: { select: { id: true, business_name: true, business_card_id: true } },
+        business: { select: { id: true, company_name: true } },
+      },
     });
     console.log('[createEvent] success — event.id:', event.id);
     res.status(201).json(event);
@@ -180,12 +183,15 @@ export async function updateEvent(req: AuthRequest, res: Response): Promise<void
   try {
     const event = await prisma.event.findUnique({
       where: { id },
-      include: { business: { select: { user_id: true } } },
+      include: {
+        business_promotion: { select: { user_id: true } },
+        business: { select: { user_id: true } },
+      },
     });
     if (!event) { console.log('[updateEvent] not found for id:', id); res.status(404).json({ error: 'Not found' }); return; }
-    const ownerId = event.business?.user_id;
-    if (ownerId !== req.user!.userId && !req.user!.roles.includes('admin')) {
-      console.log('[updateEvent] forbidden — owner:', ownerId, 'requester:', req.user!.userId);
+    const ownerUserId = event.business_promotion?.user_id ?? event.business?.user_id ?? null;
+    if (ownerUserId !== req.user!.userId && !req.user!.roles.includes('admin')) {
+      console.log('[updateEvent] forbidden — owner:', ownerUserId, 'requester:', req.user!.userId);
       res.status(403).json({ error: 'Forbidden' }); return;
     }
 
@@ -409,12 +415,15 @@ export async function getEventRegistrations(req: AuthRequest, res: Response): Pr
   try {
     const event = await prisma.event.findUnique({
       where: { id: eventId },
-      include: { business: { select: { user_id: true } } },
+      include: {
+        business_promotion: { select: { user_id: true } },
+        business: { select: { user_id: true } },
+      },
     });
     if (!event) { console.log('[getEventRegistrations] event not found:', eventId); res.status(404).json({ error: 'Event not found' }); return; }
-    const ownerId = event.business?.user_id;
-    if (ownerId !== req.user!.userId && !req.user!.roles.includes('admin')) {
-      console.log('[getEventRegistrations] forbidden — owner:', ownerId, 'requester:', req.user!.userId);
+    const ownerUserId = event.business_promotion?.user_id ?? event.business?.user_id ?? null;
+    if (ownerUserId !== req.user!.userId && !req.user!.roles.includes('admin')) {
+      console.log('[getEventRegistrations] forbidden — owner:', ownerUserId, 'requester:', req.user!.userId);
       res.status(403).json({ error: 'Forbidden' }); return;
     }
 
@@ -475,10 +484,14 @@ export async function verifyRegistration(req: AuthRequest, res: Response): Promi
     // Only allow event owner or admin to verify
     const event = await prisma.event.findUnique({
       where: { id: registration.event_id },
-      include: { business: { select: { user_id: true } } },
+      include: {
+        business_promotion: { select: { user_id: true } },
+        business: { select: { user_id: true } },
+      },
     });
-    if (event && event.business && event.business.user_id !== req.user!.userId && !req.user!.roles.includes('admin')) {
-      console.log('[verifyRegistration] forbidden — owner:', event.business.user_id, 'requester:', req.user!.userId);
+    const ownerUserId = event?.business_promotion?.user_id ?? event?.business?.user_id ?? null;
+    if (event && ownerUserId !== req.user!.userId && !req.user!.roles.includes('admin')) {
+      console.log('[verifyRegistration] forbidden — owner:', ownerUserId, 'requester:', req.user!.userId);
       res.status(403).json({ error: 'Only the event organizer or admin can verify registrations' });
       return;
     }
