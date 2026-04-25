@@ -359,7 +359,7 @@ model Event {
   id                    Int                 @id @default(autoincrement())
   legacy_id             String?             @unique
   business_id           Int?
-  business_promotion_id Int
+  business_promotion_id Int?
   title                 String
   description           String?
   date                  DateTime
@@ -371,12 +371,31 @@ model Event {
   attendee_count        Int                 @default(0)
   status                String              @default("active")
   created_at            DateTime            @default(now())
+  // Admin-upload fields
+  sr_no                 Int?
+  start_date            DateTime?
+  end_date              DateTime?
+  days                  Int?
+  city                  String?
+  state                 String?
+  event_type            String?
+  source_website        String?
+  venue                 String?
+  category              String?
+  is_free               Boolean             @default(true)
+  price                 Float               @default(0)
+  is_featured           Boolean             @default(false)
+  organizer_name        String?
+  uploaded_by_admin     Boolean             @default(false)
   business              BusinessCard?       @relation(fields: [business_id], references: [id], onDelete: SetNull)
-  business_promotion    BusinessPromotion   @relation("BusinessPromotionEvents", fields: [business_promotion_id], references: [id], onDelete: Cascade)
+  business_promotion    BusinessPromotion?  @relation("BusinessPromotionEvents", fields: [business_promotion_id], references: [id], onDelete: Cascade)
   registrations         EventRegistration[]
 
   @@index([business_promotion_id])
   @@index([business_promotion_id, status])
+  @@index([uploaded_by_admin])
+  @@index([city])
+  @@index([state])
 }
 
 model EventRegistration {
