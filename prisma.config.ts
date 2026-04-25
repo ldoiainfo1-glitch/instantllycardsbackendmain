@@ -9,6 +9,10 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    // DIRECT_URL = non-pooled Supabase connection (port 5432).
+    // Required for `prisma migrate deploy` which needs session-level advisory
+    // locks that PgBouncer transaction mode (port 6543) does not support.
+    // Runtime queries use DATABASE_URL (port 6543) via src/utils/prisma.ts pool.
+    url: process.env["DIRECT_URL"] ?? process.env["DATABASE_URL"],
   },
 });
