@@ -37,7 +37,10 @@ beforeAll(async () => {
     .send({ full_name: 'Voucher Business', company_name: 'Voucher Co' });
   cardId = cardRes.body.id;
 
-  const userA = await prisma.user.findUnique({ where: { phone: PHONE_A } });
+  const userA = await prisma.user.findUnique({
+    where: { phone: PHONE_A },
+    select: { id: true },
+  });
   if (!userA) throw new Error('User A not found');
 
   const promotion = await prisma.businessPromotion.create({
@@ -45,8 +48,10 @@ beforeAll(async () => {
       user_id: userA.id,
       business_card_id: cardId,
       business_name: 'Voucher Co',
-      owner_name: 'Voucher Business',
-      status: 'published',
+      owner_name: 'Voucher Owner',
+      status: 'active',
+      payment_status: 'completed',
+      tier: 'boost',
     },
   });
   promotionId = promotion.id;
@@ -54,7 +59,6 @@ beforeAll(async () => {
   // Seed a voucher directly
   const v = await prisma.voucher.create({
     data: {
-      business_id: cardId,
       business_promotion_id: promotionId,
       business_name: 'Voucher Co',
       title: 'Test Voucher',
