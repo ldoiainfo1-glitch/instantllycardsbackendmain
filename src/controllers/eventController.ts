@@ -60,25 +60,28 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
   }
 
   try {
-    const events = await prisma.event.findMany({
-      where,
-      skip: (page - 1) * limit,
-      take: limit,
-      orderBy: { date: "asc" },
-      include: {
-        business: {
-          select: {
-            id: true,
-            company_name: true,
-            logo_url: true,
-            full_name: true,
+    const [events, total] = await Promise.all([
+      prisma.event.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { date: "asc" },
+        include: {
+          business: {
+            select: {
+              id: true,
+              company_name: true,
+              logo_url: true,
+              full_name: true,
+            },
           },
+          _count: { select: { registrations: true } },
         },
-        _count: { select: { registrations: true } },
-      },
-    });
-    console.log("[listEvents] returned", events.length, "events");
-    res.json({ data: events, page, limit });
+      }),
+      prisma.event.count({ where }),
+    ]);
+    console.log("[listEvents] returned", events.length, "of", total, "events");
+    res.json({ data: events, page, limit, total });
   } catch (err) {
     console.error("[listEvents] ERROR:", err);
     res.status(500).json({ error: "Internal server error" });
