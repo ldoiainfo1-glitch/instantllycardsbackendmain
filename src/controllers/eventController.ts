@@ -31,6 +31,7 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
   const limit = queryInt(req.query.limit, 20);
   const category = req.query.category as string | undefined;
   const search = req.query.search as string | undefined;
+  const city = req.query.city as string | undefined;
   console.log(
     "[listEvents] page:",
     page,
@@ -40,6 +41,8 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
     search,
     "category:",
     category,
+    "city:",
+    city,
   );
 
   const where: any = { status: "active" };
@@ -53,6 +56,14 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
       { state: { contains: search, mode: "insensitive" } },
       { event_type: { contains: search, mode: "insensitive" } },
       { category: { contains: search, mode: "insensitive" } },
+    ];
+  } else if (city) {
+    // When no search query, filter by city
+    where.OR = [
+      { city: { contains: city, mode: "insensitive" } },
+      { state: { contains: city, mode: "insensitive" } },
+      { location: { contains: city, mode: "insensitive" } },
+      { venue: { contains: city, mode: "insensitive" } },
     ];
   }
   if (category) {

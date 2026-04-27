@@ -185,6 +185,7 @@ model BusinessCard {
   gst_number            String?
   pan_number            String?
   pincode               String?
+  state                 String?
   ads                   Ad[]
   bookings              Booking[]
   user                  User                   @relation(fields: [user_id], references: [id], onDelete: Cascade)
