@@ -40,6 +40,7 @@ export async function getGroups(req: AuthRequest, res: Response) {
       memberCount: m.group._count.members,
       myRole: m.role,
       isMuted: m.is_muted,
+      unreadCount: m.unread_count,
       lastMessage: m.group.last_message
         ? {
             id: m.group.last_message.id,
@@ -344,6 +345,12 @@ export async function getGroupMessages(req: AuthRequest, res: Response) {
         is_read: true,
         read_at: new Date(),
       },
+    });
+
+    // Reset this user's unread count for the group
+    await prisma.groupMember.updateMany({
+      where: { group_id: groupId, user_id: userId },
+      data: { unread_count: 0 },
     });
 
     const messages = await prisma.message.findMany({

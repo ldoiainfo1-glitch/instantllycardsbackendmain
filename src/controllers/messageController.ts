@@ -41,6 +41,12 @@ export async function sendMessage(req: AuthRequest, res: Response) {
         data: { last_message_id: message.id, last_message_time: message.created_at },
       });
 
+      // Increment unread_count for all group members except the sender
+      await prisma.groupMember.updateMany({
+        where: { group_id: groupId, user_id: { not: userId } },
+        data: { unread_count: { increment: 1 } },
+      });
+
       // Emit real-time notification to all other group members via their personal socket room
       try {
         const io = getIO();
