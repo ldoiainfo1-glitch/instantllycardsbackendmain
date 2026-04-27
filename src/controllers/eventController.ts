@@ -31,6 +31,7 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
   const limit = queryInt(req.query.limit, 20);
   const category = req.query.category as string | undefined;
   const search = req.query.search as string | undefined;
+  const city = req.query.city as string | undefined;
   console.log(
     "[listEvents] page:",
     page,
@@ -40,11 +41,14 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
     search,
     "category:",
     category,
+    "city:",
+    city,
   );
 
   const where: any = { status: "active" };
+
   if (search) {
-    where.OR = [
+    const searchFilter = [
       { title: { contains: search, mode: "insensitive" } },
       { description: { contains: search, mode: "insensitive" } },
       { location: { contains: search, mode: "insensitive" } },
@@ -54,31 +58,54 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
       { event_type: { contains: search, mode: "insensitive" } },
       { category: { contains: search, mode: "insensitive" } },
     ];
+    if (city) {
+      // both search and city — use AND
+      const cityFilter = [
+        { city: { contains: city, mode: "insensitive" } },
+        { venue: { contains: city, mode: "insensitive" } },
+        { location: { contains: city, mode: "insensitive" } },
+        { state: { contains: city, mode: "insensitive" } },
+      ];
+      where.AND = [{ OR: searchFilter }, { OR: cityFilter }];
+    } else {
+      where.OR = searchFilter;
+    }
+  } else if (city) {
+    where.OR = [
+      { city: { contains: city, mode: "insensitive" } },
+      { venue: { contains: city, mode: "insensitive" } },
+      { location: { contains: city, mode: "insensitive" } },
+      { state: { contains: city, mode: "insensitive" } },
+    ];
   }
+
   if (category) {
     where.category = { contains: category, mode: "insensitive" };
   }
 
   try {
-    const events = await prisma.event.findMany({
-      where,
-      skip: (page - 1) * limit,
-      take: limit,
-      orderBy: { date: "asc" },
-      include: {
-        business: {
-          select: {
-            id: true,
-            company_name: true,
-            logo_url: true,
-            full_name: true,
+    const [events, total] = await Promise.all([
+      prisma.event.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { date: "asc" },
+        include: {
+          business: {
+            select: {
+              id: true,
+              company_name: true,
+              logo_url: true,
+              full_name: true,
+            },
           },
+          _count: { select: { registrations: true } },
         },
-        _count: { select: { registrations: true } },
-      },
-    });
-    console.log("[listEvents] returned", events.length, "events");
-    res.json({ data: events, page, limit });
+      }),
+      prisma.event.count({ where }),
+    ]);
+    console.log("[listEvents] returned", events.length, "events of", total, "total");
+    res.json({ data: events, page, limit, total });
   } catch (err) {
     console.error("[listEvents] ERROR:", err);
     res.status(500).json({ error: "Internal server error" });
