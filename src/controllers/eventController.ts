@@ -46,8 +46,9 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
   );
 
   const where: any = { status: "active" };
+
   if (search) {
-    where.OR = [
+    const searchFilter = [
       { title: { contains: search, mode: "insensitive" } },
       { description: { contains: search, mode: "insensitive" } },
       { location: { contains: search, mode: "insensitive" } },
@@ -57,15 +58,27 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
       { event_type: { contains: search, mode: "insensitive" } },
       { category: { contains: search, mode: "insensitive" } },
     ];
+    if (city) {
+      // both search and city — use AND
+      const cityFilter = [
+        { city: { contains: city, mode: "insensitive" } },
+        { venue: { contains: city, mode: "insensitive" } },
+        { location: { contains: city, mode: "insensitive" } },
+        { state: { contains: city, mode: "insensitive" } },
+      ];
+      where.AND = [{ OR: searchFilter }, { OR: cityFilter }];
+    } else {
+      where.OR = searchFilter;
+    }
   } else if (city) {
-    // When no search query, filter by city
     where.OR = [
       { city: { contains: city, mode: "insensitive" } },
-      { state: { contains: city, mode: "insensitive" } },
-      { location: { contains: city, mode: "insensitive" } },
       { venue: { contains: city, mode: "insensitive" } },
+      { location: { contains: city, mode: "insensitive" } },
+      { state: { contains: city, mode: "insensitive" } },
     ];
   }
+
   if (category) {
     where.category = { contains: category, mode: "insensitive" };
   }
@@ -91,7 +104,7 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
       }),
       prisma.event.count({ where }),
     ]);
-    console.log("[listEvents] returned", events.length, "of", total, "events");
+    console.log("[listEvents] returned", events.length, "events of", total, "total");
     res.json({ data: events, page, limit, total });
   } catch (err) {
     console.error("[listEvents] ERROR:", err);
