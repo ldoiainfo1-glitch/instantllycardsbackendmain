@@ -14,6 +14,8 @@ import {
   getMyTransfers,
   redeemVoucher,
   updateVoucherStatus,
+  createVoucherPaymentIntent,
+  verifyVoucherPayment,
 } from '../controllers/voucherController';
 
 const router = Router();
@@ -42,6 +44,18 @@ router.post(
   h(createVoucher)
 );
 router.post('/:id/claim', authenticate, h(claimVoucher));
+router.post('/:id/payment-intent', authenticate, h(createVoucherPaymentIntent));
+router.post(
+  '/:id/verify-payment',
+  authenticate,
+  [
+    body('razorpay_order_id').notEmpty(),
+    body('razorpay_payment_id').notEmpty(),
+    body('razorpay_signature').notEmpty(),
+  ],
+  validate,
+  h(verifyVoucherPayment)
+);
 router.patch('/:id/status', authenticate, [body('status').notEmpty()], validate, h(updateVoucherStatus));
 router.post('/redeem', authenticate, [body('voucher_id').isInt()], validate, h(redeemVoucher));
 router.post(
