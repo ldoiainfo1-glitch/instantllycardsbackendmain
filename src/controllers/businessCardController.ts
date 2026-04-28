@@ -284,6 +284,279 @@ export async function shareCard(req: AuthRequest, res: Response): Promise<void> 
   }
 }
 
+/**
+ * POST /api/cards/exchange
+ * Records a mutual card exchange triggered by scanning a QR.
+ * Creates two SharedCard rows so both users see entries in their
+ * Sent and Received tabs:
+ *   1. scanner's card → scanned user (scanner is sender)
+ *   2. scanned user's card → scanner (scanned user is sender)
+ *
+ * Body: { my_card_id: number, scanned_card_id: number }
+ *   my_card_id      - card the scanner wants to share (must be owned by scanner)
+ *   scanned_card_id - card whose QR was scanned
+ */
+export async function exchangeCards(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const scannerId = req.user!.userId;
+    const { my_card_id, scanned_card_id } = req.body as {
+      my_card_id: number | string;
+      scanned_card_id: number | string;
+    };
+
+    const myCardId = parseInt(String(my_card_id), 10);
+    const scannedCardId = parseInt(String(scanned_card_id), 10);
+    if (!myCardId || !scannedCardId) {
+      res.status(400).json({ error: 'my_card_id and scanned_card_id required' });
+      return;
+    }
+
+    const [myCard, scannedCard, scanner] = await Promise.all([
+      prisma.businessCard.findUnique({ where: { id: myCardId } }),
+      prisma.businessCard.findUnique({ where: { id: scannedCardId } }),
+      prisma.user.findUnique({ where: { id: scannerId } }),
+    ]);
+
+    if (!myCard || !scannedCard || !scanner) {
+      res.status(404).json({ error: 'Card or user not found' });
+      return;
+    }
+    if (myCard.user_id !== scannerId) {
+      res.status(403).json({ error: 'You can only share cards you own' });
+      return;
+    }
+    if (scannedCard.user_id === scannerId) {
+      res.status(400).json({ error: 'Cannot exchange with your own card' });
+      return;
+    }
+
+    const scannedUser = await prisma.user.findUnique({ where: { id: scannedCard.user_id } });
+    if (!scannedUser) {
+      res.status(404).json({ error: 'Scanned card owner not found' });
+      return;
+    }
+
+    const scannerIdStr = String(scannerId);
+    const scannedIdStr = String(scannedUser.id);
+
+    // Helper: idempotent insert
+    const upsertShare = async (
+      cardId: number,
+      senderIdStr: string,
+      recipientIdStr: string,
+      cardObj: any,
+      senderObj: any,
+      recipientObj: any
+    ) => {
+      const existing = await prisma.sharedCard.findFirst({
+        where: { card_id: cardId, sender_id: senderIdStr, recipient_id: recipientIdStr },
+      });
+      if (existing) return { share: existing, alreadyExists: true };
+      const share = await prisma.sharedCard.create({
+        data: {
+          card_id: cardId,
+          sender_id: senderIdStr,
+          recipient_id: recipientIdStr,
+          message: 'Exchanged via QR scan',
+          card_title: cardObj.company_name || cardObj.full_name,
+          sender_name: senderObj.name || senderObj.phone,
+          recipient_name: recipientObj.name || recipientObj.phone || 'Unknown',
+          card_photo: cardObj.company_photo || cardObj.logo_url,
+          sender_profile_picture: senderObj.profile_picture,
+        },
+      });
+      return { share, alreadyExists: false };
+    };
+
+    const [outgoing, incoming] = await Promise.all([
+      // 1. Scanner shares their card with the scanned user
+      upsertShare(myCard.id, scannerIdStr, scannedIdStr, myCard, scanner, scannedUser),
+      // 2. Scanned user implicitly "shared" their card with the scanner (QR exposure)
+      upsertShare(scannedCard.id, scannedIdStr, scannerIdStr, scannedCard, scannedUser, scanner),
+    ]);
+
+    // Emit socket + push to scanned user about the new incoming share
+    try {
+      const io = getIO();
+      if (io && !outgoing.alreadyExists) {
+        io.to(`user:${scannedUser.id}`).emit('card:shared', {
+          id: outgoing.share.id,
+          card_id: outgoing.share.card_id,
+          card_title: outgoing.share.card_title,
+          card_photo: outgoing.share.card_photo,
+          sender_id: outgoing.share.sender_id,
+          sender_name: outgoing.share.sender_name,
+          recipient_id: outgoing.share.recipient_id,
+          sent_at: outgoing.share.sent_at || outgoing.share.created_at,
+        });
+      }
+      if (!outgoing.alreadyExists && scannedUser.push_token) {
+        sendExpoPushNotification(
+          scannedUser.push_token,
+          'New Card Received',
+          `${outgoing.share.sender_name} exchanged cards with you`,
+          { screen: 'Messaging', tab: 'Received' }
+        );
+      }
+      if (!incoming.alreadyExists && scanner.push_token) {
+        sendExpoPushNotification(
+          scanner.push_token,
+          'New Card Received',
+          `You received ${incoming.share.sender_name}'s card`,
+          { screen: 'Messaging', tab: 'Received' }
+        );
+      }
+      // DB notifications (in-app bell)
+      if (!outgoing.alreadyExists) {
+        prisma.notification.create({
+          data: {
+            user_id: scannedUser.id,
+            type: 'card_received',
+            title: 'New Card Received',
+            description: `${outgoing.share.sender_name} exchanged cards with you`,
+          },
+        }).catch(() => {});
+      }
+      if (!incoming.alreadyExists) {
+        prisma.notification.create({
+          data: {
+            user_id: scanner.id,
+            type: 'card_received',
+            title: 'New Card Received',
+            description: `You received ${incoming.share.sender_name}'s card`,
+          },
+        }).catch(() => {});
+      }
+    } catch { /* non-blocking */ }
+
+    res.status(201).json({
+      outgoing: outgoing.share,
+      incoming: incoming.share,
+      alreadyExists: outgoing.alreadyExists && incoming.alreadyExists,
+    });
+  } catch (err) {
+    console.error('[EXCHANGE-CARDS] Failed', err);
+    res.status(500).json({ error: 'Failed to exchange cards' });
+  }
+}
+
+/**
+ * POST /api/cards/save-received
+ * Records that the scanner has "received" a scanned card without sending
+ * their own card back. Creates a single SharedCard row where:
+ *   - sender_id   = scanned card's owner
+ *   - recipient_id = scanner (current user)
+ * This makes the scanned card show up in the scanner's Received tab.
+ *
+ * Body: { scanned_card_id: number }
+ */
+export async function saveReceivedCard(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const scannerId = req.user!.userId;
+    const { scanned_card_id } = req.body as { scanned_card_id: number | string };
+    const cardId = parseInt(String(scanned_card_id), 10);
+    if (!cardId) {
+      res.status(400).json({ error: 'scanned_card_id required' });
+      return;
+    }
+
+    const card = await prisma.businessCard.findUnique({ where: { id: cardId } });
+    if (!card) { res.status(404).json({ error: 'Card not found' }); return; }
+    if (card.user_id === scannerId) {
+      res.status(400).json({ error: 'Cannot save your own card' });
+      return;
+    }
+
+    const [scanner, owner] = await Promise.all([
+      prisma.user.findUnique({ where: { id: scannerId } }),
+      prisma.user.findUnique({ where: { id: card.user_id } }),
+    ]);
+    if (!scanner || !owner) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const senderIdStr = String(owner.id);
+    const recipientIdStr = String(scanner.id);
+
+    const existing = await prisma.sharedCard.findFirst({
+      where: { card_id: card.id, sender_id: senderIdStr, recipient_id: recipientIdStr },
+    });
+    if (existing) {
+      res.status(200).json({ ...existing, alreadyExists: true });
+      return;
+    }
+
+    const share = await prisma.sharedCard.create({
+      data: {
+        card_id: card.id,
+        sender_id: senderIdStr,
+        recipient_id: recipientIdStr,
+        message: 'Saved via QR scan',
+        card_title: card.company_name || card.full_name,
+        sender_name: owner.name || owner.phone,
+        recipient_name: scanner.name || scanner.phone || 'Unknown',
+        card_photo: card.company_photo || card.logo_url,
+        sender_profile_picture: owner.profile_picture,
+      },
+    });
+
+    // Real-time + push notifications + DB notifications
+    try {
+      const io = getIO();
+      if (io) {
+        io.to(`user:${scanner.id}`).emit('card:shared', {
+          id: share.id,
+          card_id: share.card_id,
+          card_title: share.card_title,
+          card_photo: share.card_photo,
+          sender_id: share.sender_id,
+          sender_name: share.sender_name,
+          recipient_id: share.recipient_id,
+          sent_at: share.sent_at || share.created_at,
+        });
+      }
+      if (scanner.push_token) {
+        sendExpoPushNotification(
+          scanner.push_token,
+          'Card Saved',
+          `You saved ${share.sender_name}'s card`,
+          { screen: 'Messaging', tab: 'Received' }
+        );
+      }
+      if (owner.push_token) {
+        sendExpoPushNotification(
+          owner.push_token,
+          'Someone Saved Your Card',
+          `${scanner.name || scanner.phone || 'Someone'} saved your card`,
+          { screen: 'Messaging', tab: 'Received' }
+        );
+      }
+      prisma.notification.create({
+        data: {
+          user_id: scanner.id,
+          type: 'card_received',
+          title: 'Card Saved',
+          description: `You saved ${share.sender_name}'s card`,
+        },
+      }).catch(() => {});
+      prisma.notification.create({
+        data: {
+          user_id: owner.id,
+          type: 'card_saved_by_other',
+          title: 'Someone Saved Your Card',
+          description: `${scanner.name || scanner.phone || 'Someone'} saved your card`,
+        },
+      }).catch(() => {});
+    } catch { /* non-blocking */ }
+
+    res.status(201).json(share);
+  } catch (err) {
+    console.error('[SAVE-RECEIVED] Failed', err);
+    res.status(500).json({ error: 'Failed to save card' });
+  }
+}
+
 export async function getSharedCards(req: AuthRequest, res: Response): Promise<void> {
   try {
     const userId = String(req.user!.userId);

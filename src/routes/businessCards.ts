@@ -12,6 +12,8 @@ import {
   deleteCard,
   getMyCards,
   shareCard,
+  exchangeCards,
+  saveReceivedCard,
   getSharedCards,
   bulkSendCard,
 } from '../controllers/businessCardController';
@@ -67,6 +69,22 @@ router.post(
   [body('card_id').isInt(), body('recipient_user_id').isInt()],
   validate,
   h(shareCard)
+);
+
+router.post(
+  '/exchange',
+  authenticate,
+  [body('my_card_id').isInt(), body('scanned_card_id').isInt()],
+  validate,
+  h(exchangeCards)
+);
+
+router.post(
+  '/save-received',
+  authenticate,
+  [body('scanned_card_id').isInt()],
+  validate,
+  h(saveReceivedCard)
 );
 
 const bulkSendLimit =
