@@ -314,7 +314,7 @@ model Voucher {
   template              Voucher?             @relation("VoucherTemplate", fields: [template_id], references: [id])
   derived_vouchers      Voucher[]            @relation("VoucherTemplate")
   transferred_from      User?                @relation("VoucherTransferredFrom", fields: [transferred_from_id], references: [id])
-  claims                VoucherClaim?
+  claims                VoucherClaim[]
   voucher_redemptions   VoucherRedemption[]
   transfers             VoucherTransfer[]
   voucher_transfer_logs VoucherTransferLog[]
@@ -329,7 +329,7 @@ model Voucher {
 model VoucherClaim {
   id          Int       @id @default(autoincrement())
   legacy_id   String?   @unique
-  voucher_id  Int       @unique(map: "VoucherClaim_one_active_owner_idx", where: raw("(status = 'active'::text)"))
+  voucher_id  Int
   user_id     Int
   claimed_at  DateTime  @default(now())
   redeemed_at DateTime?

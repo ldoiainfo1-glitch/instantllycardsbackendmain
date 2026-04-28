@@ -6,6 +6,7 @@ import { paramInt, queryInt } from '../utils/params';
 import { normalizePhone, phoneVariants } from '../utils/phone';
 import { getIO } from '../services/socketService';
 import { sendExpoPushNotification } from '../utils/push';
+import { createRazorpayOrder, getRazorpayPublicKey, verifyRazorpaySignature } from '../services/razorpayService';
 
 function parseOptionalInt(value: unknown): number | null {
   if (value === undefined || value === null || value === '') return null;
@@ -15,6 +16,39 @@ function parseOptionalInt(value: unknown): number | null {
 
 function getVoucherExpiry(voucher: { expiry_date?: Date | null; expires_at?: Date | null }): Date | null {
   return voucher.expiry_date ?? voucher.expires_at ?? null;
+}
+
+/**
+ * Compute display-ready pricing fields for a voucher row and attach them
+ * to the response. Mobile prefers these computed fields over raw columns.
+ */
+function decorateVoucher<T extends Record<string, any>>(v: T | null | undefined): T & {
+  original_price: number;
+  discounted_price: number;
+  discount_label: string;
+} | null {
+  if (!v) return null;
+  const original = Number(v.mrp ?? v.amount ?? 0);
+  const dValue = Number(v.discount_value ?? 0);
+  const dType = v.discount_type === 'percent' ? 'percent' : 'flat';
+  let discounted = original;
+  if (original > 0) {
+    discounted = dType === 'percent'
+      ? Math.max(0, original - (original * dValue) / 100)
+      : Math.max(0, original - dValue);
+  } else if (dType === 'flat' && dValue > 0) {
+    // Legacy rows with no original price stored
+    discounted = 0;
+  }
+  const label = dType === 'percent'
+    ? `${dValue}% OFF`
+    : `₹${dValue} OFF`;
+  return {
+    ...v,
+    original_price: original,
+    discounted_price: Math.round(discounted * 100) / 100,
+    discount_label: label,
+  };
 }
 
 export async function listVouchers(req: Request, res: Response): Promise<void> {
@@ -39,7 +73,7 @@ export async function listVouchers(req: Request, res: Response): Promise<void> {
       business_promotion: { select: { id: true, business_name: true, tier: true, status: true, payment_status: true } },
     },
   });
-  res.json({ data: vouchers, page, limit });
+  res.json({ data: vouchers.map(decorateVoucher), page, limit });
 }
 
 export async function getVoucher(req: Request, res: Response): Promise<void> {
@@ -49,7 +83,7 @@ export async function getVoucher(req: Request, res: Response): Promise<void> {
     include: { business_promotion: true },
   });
   if (!voucher) { res.status(404).json({ error: 'Not found' }); return; }
-  res.json(voucher);
+  res.json(decorateVoucher(voucher));
 }
 
 export async function createVoucher(req: AuthRequest, res: Response): Promise<void> {
@@ -63,6 +97,8 @@ export async function createVoucher(req: AuthRequest, res: Response): Promise<vo
     code,
     max_claims,
     expires_at,
+    original_price,
+    mrp,
   } = req.body;
 
   if (!title) {
@@ -114,6 +150,15 @@ export async function createVoucher(req: AuthRequest, res: Response): Promise<vo
 
   const parsedExpiry = expires_at ? new Date(expires_at) : null;
 
+  // Accept either `original_price` or `mrp` for the pre-discount price.
+  const rawOriginal = original_price ?? mrp;
+  const parsedOriginal = rawOriginal !== undefined && rawOriginal !== null && rawOriginal !== ''
+    ? Number(rawOriginal)
+    : null;
+  const finalOriginal = parsedOriginal !== null && !Number.isNaN(parsedOriginal) && parsedOriginal >= 0
+    ? parsedOriginal
+    : null;
+
   const voucher = await prisma.voucher.create({
     data: {
       business_id: promo.business_card_id ?? undefined,
@@ -129,9 +174,11 @@ export async function createVoucher(req: AuthRequest, res: Response): Promise<vo
       expiry_date: parsedExpiry,
       status: 'active',
       owner_user_id: req.user!.userId,
+      mrp: finalOriginal,
+      amount: finalOriginal,
     },
   });
-  res.status(201).json(voucher);
+  res.status(201).json(decorateVoucher(voucher));
 }
 
 export async function claimVoucher(req: AuthRequest, res: Response): Promise<void> {
@@ -150,25 +197,16 @@ export async function claimVoucher(req: AuthRequest, res: Response): Promise<voi
     res.status(400).json({ error: 'Voucher fully claimed' }); return;
   }
 
-  const activeClaim = await prisma.voucherClaim.findFirst({
-    where: { voucher_id: id, status: 'active' },
-    select: { id: true, user_id: true },
+  // Multiple users can claim the same voucher (subject to max_claims/expiry).
+  // Only block if THIS user has already claimed it.
+  const existingUserClaim = await prisma.voucherClaim.findFirst({
+    where: { voucher_id: id, user_id: req.user!.userId },
+    select: { id: true, status: true },
   });
-  if (activeClaim && activeClaim.user_id !== req.user!.userId) {
-    res.status(409).json({ error: 'Voucher already claimed by another user' });
-    return;
-  }
-
-  if (activeClaim && activeClaim.user_id === req.user!.userId) {
+  if (existingUserClaim) {
     res.status(409).json({ error: 'Already claimed' });
     return;
   }
-
-  const existingUserClaim = await prisma.voucherClaim.findFirst({
-    where: { voucher_id: id, user_id: req.user!.userId },
-    select: { id: true },
-  });
-  if (existingUserClaim) { res.status(409).json({ error: 'Already claimed' }); return; }
 
   let claim;
   try {
@@ -339,7 +377,7 @@ export async function getMyVouchers(req: AuthRequest, res: Response): Promise<vo
     },
     orderBy: { claimed_at: 'desc' },
   });
-  res.json(claims);
+  res.json(claims.map((c: any) => ({ ...c, voucher: decorateVoucher(c.voucher) })));
 }
 
 export async function getMyCreatedVouchers(req: AuthRequest, res: Response): Promise<void> {
@@ -365,7 +403,7 @@ export async function getMyCreatedVouchers(req: AuthRequest, res: Response): Pro
     orderBy: { created_at: 'desc' },
     include: { business_promotion: { select: { id: true, business_name: true, tier: true, status: true, payment_status: true } } },
   });
-  res.json(vouchers);
+  res.json(vouchers.map(decorateVoucher));
 }
 
 export async function getMyTransfers(req: AuthRequest, res: Response): Promise<void> {
@@ -494,4 +532,158 @@ export async function redeemVoucher(req: AuthRequest, res: Response): Promise<vo
     redeemed_at: updated.redeemed_at,
     status: updated.status,
   });
+}
+
+/**
+ * POST /vouchers/:id/payment-intent
+ * Creates a Razorpay order for the voucher's discounted price.
+ * Returns the order details required by the mobile checkout SDK/WebView.
+ */
+export async function createVoucherPaymentIntent(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const id = paramInt(req.params.id);
+    const voucher = await prisma.voucher.findUnique({ where: { id } });
+    if (!voucher) { res.status(404).json({ error: 'Voucher not found' }); return; }
+    if (voucher.status !== 'active') { res.status(400).json({ error: 'Voucher not active' }); return; }
+
+    const expiry = getVoucherExpiry(voucher);
+    if (expiry && expiry <= new Date()) {
+      res.status(400).json({ error: 'Voucher expired' }); return;
+    }
+
+    if (voucher.max_claims && voucher.claimed_count >= voucher.max_claims) {
+      res.status(400).json({ error: 'Voucher fully claimed' }); return;
+    }
+
+    const existing = await prisma.voucherClaim.findFirst({
+      where: { voucher_id: id, user_id: req.user!.userId },
+      select: { id: true },
+    });
+    if (existing) { res.status(409).json({ error: 'Already claimed' }); return; }
+
+    const decorated = decorateVoucher(voucher)!;
+    const amount = Number(decorated.discounted_price || 0);
+    if (amount <= 0) {
+      res.status(400).json({ error: 'Voucher is free \u2014 no payment required' });
+      return;
+    }
+
+    const amountPaise = Math.round(amount * 100);
+    const order = await createRazorpayOrder({
+      amountPaise,
+      currency: 'INR',
+      receipt: `voucher_${id}_user_${req.user!.userId}`,
+      notes: {
+        voucher_id: String(id),
+        user_id: String(req.user!.userId),
+        kind: 'voucher_claim',
+      },
+    });
+
+    res.json({
+      key: getRazorpayPublicKey(),
+      order_id: order.id,
+      amount: amountPaise,
+      currency: 'INR',
+      voucher_id: id,
+      voucher_title: voucher.title,
+    });
+  } catch (err) {
+    console.error('[VOUCHER-PAYMENT] Failed to create intent', err);
+    res.status(500).json({ error: 'Failed to create payment intent' });
+  }
+}
+
+/**
+ * POST /vouchers/:id/verify-payment
+ * Verifies the Razorpay signature, then creates the voucher claim atomically.
+ * Body: { razorpay_order_id, razorpay_payment_id, razorpay_signature }
+ */
+export async function verifyVoucherPayment(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const id = paramInt(req.params.id);
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      res.status(400).json({ error: 'Payment verification fields are required' });
+      return;
+    }
+
+    const isValid = verifyRazorpaySignature({
+      razorpayOrderId: razorpay_order_id,
+      razorpayPaymentId: razorpay_payment_id,
+      razorpaySignature: razorpay_signature,
+    });
+    if (!isValid) {
+      res.status(400).json({ error: 'Invalid payment signature' });
+      return;
+    }
+
+    const voucher = await prisma.voucher.findUnique({
+      where: { id },
+      select: { id: true, title: true, status: true, max_claims: true, claimed_count: true, owner_user_id: true, expiry_date: true, expires_at: true },
+    });
+    if (!voucher) { res.status(404).json({ error: 'Voucher not found' }); return; }
+    if (voucher.status !== 'active') { res.status(400).json({ error: 'Voucher not active' }); return; }
+
+    const expiry = getVoucherExpiry(voucher);
+    if (expiry && expiry <= new Date()) {
+      res.status(400).json({ error: 'Voucher expired' }); return;
+    }
+    if (voucher.max_claims && voucher.claimed_count >= voucher.max_claims) {
+      res.status(400).json({ error: 'Voucher fully claimed' }); return;
+    }
+
+    const existing = await prisma.voucherClaim.findFirst({
+      where: { voucher_id: id, user_id: req.user!.userId },
+      select: { id: true },
+    });
+    if (existing) { res.status(409).json({ error: 'Already claimed' }); return; }
+
+    let claim;
+    try {
+      [claim] = await prisma.$transaction([
+        prisma.voucherClaim.create({
+          data: { voucher_id: id, user_id: req.user!.userId, status: 'active' },
+        }),
+        prisma.voucher.update({
+          where: { id },
+          data: { claimed_count: { increment: 1 } },
+        }),
+      ]);
+    } catch (err: unknown) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        res.status(409).json({ error: 'Already claimed' });
+        return;
+      }
+      throw err;
+    }
+
+    // Notify voucher creator
+    try {
+      if (voucher.owner_user_id && voucher.owner_user_id !== req.user!.userId) {
+        const owner = await prisma.user.findUnique({ where: { id: voucher.owner_user_id }, select: { id: true, push_token: true } });
+        const claimer = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { name: true } });
+        if (owner) {
+          const io = getIO();
+          const payload = { type: 'voucher:claimed', voucherId: id, voucherTitle: voucher.title, claimerName: claimer?.name ?? 'Someone' };
+          if (io) io.to(`user:${owner.id}`).emit('voucher:claimed', payload);
+          if (owner.push_token) {
+            sendExpoPushNotification(owner.push_token, 'Voucher Claimed', `${claimer?.name ?? 'Someone'} claimed your voucher "${voucher.title}"`, { screen: 'Vouchers' });
+          }
+        }
+      }
+    } catch { /* non-blocking */ }
+
+    res.status(201).json({
+      id: claim.id,
+      voucher_id: claim.voucher_id,
+      claimed_at: claim.claimed_at,
+      status: claim.status,
+      payment_id: razorpay_payment_id,
+    });
+  } catch (err) {
+    console.error('[VOUCHER-VERIFY] Failed', err);
+    res.status(500).json({ error: 'Failed to verify payment' });
+  }
 }
