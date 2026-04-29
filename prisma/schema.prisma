@@ -55,6 +55,7 @@ model User {
   contacts                   Contact[]              @relation("ContactOwner")
   enquiries                  Enquiry[]              @relation("EnquiryUser")
   event_registrations        EventRegistration[]
+  event_waitlist             EventWaitlist[]
   favorites                  Favorite[]
   feedbacks                  Feedback[]             @relation("FeedbackUser")
   groups_admin               Group[]                @relation("GroupAdmin")
@@ -388,9 +389,19 @@ model Event {
   is_featured           Boolean             @default(false)
   organizer_name        String?
   uploaded_by_admin     Boolean             @default(false)
+  // Phase 1 platform upgrade — additive only, all nullable / defaulted
+  is_legacy             Boolean             @default(false)
+  cancelled_at          DateTime?
+  cancellation_reason   String?
+  views_count           Int                 @default(0)
+  // Phase 5 — reminder dispatch flags (per-event, set once)
+  reminder_24h_sent_at  DateTime?
+  reminder_2h_sent_at   DateTime?
   business              BusinessCard?       @relation(fields: [business_id], references: [id], onDelete: SetNull)
   business_promotion    BusinessPromotion?  @relation("BusinessPromotionEvents", fields: [business_promotion_id], references: [id], onDelete: Cascade)
   registrations         EventRegistration[]
+  ticket_tiers          EventTicketTier[]
+  waitlist              EventWaitlist[]
 
   @@index([business_promotion_id])
   @@index([business_promotion_id, status])
@@ -412,10 +423,82 @@ model EventRegistration {
   payment_id        String?
   payment_signature String?
   amount_paid       Float?
-  event             Event    @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  user              User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  // Phase 1 — additive
+  ticket_tier_id    Int?
+  checked_in        Boolean  @default(false)
+  checked_in_at     DateTime?
+  checked_in_by     Int?
+  cancelled_at      DateTime?
+  refund_status     String?  // null | requested | processing | refunded | failed
+  refund_id         String?
+  refund_amount     Float?
+  event             Event             @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user              User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  ticket_tier       EventTicketTier?  @relation(fields: [ticket_tier_id], references: [id], onDelete: SetNull)
 
+  @@unique([user_id, event_id], name: "EventRegistration_user_event_unique")
   @@index([payment_id])
+  @@index([payment_order_id])
+  @@index([qr_code])
+  @@index([event_id, checked_in])
+  @@index([ticket_tier_id])
+}
+
+model EventTicketTier {
+  id              Int                 @id @default(autoincrement())
+  event_id        Int
+  name            String              // e.g. "VIP", "Early Bird", "General"
+  description     String?
+  price           Float               @default(0)
+  currency        String              @default("INR")
+  quantity_total  Int?                // null = unlimited
+  quantity_sold   Int                 @default(0)
+  sort_order      Int                 @default(0)
+  is_active       Boolean             @default(true)
+  sale_starts_at  DateTime?
+  sale_ends_at    DateTime?
+  min_per_order   Int                 @default(1)
+  max_per_order   Int                 @default(10)
+  created_at      DateTime            @default(now())
+  updated_at      DateTime            @updatedAt
+  event           Event               @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  registrations   EventRegistration[]
+
+  @@index([event_id])
+  @@index([event_id, is_active])
+}
+
+model EventWaitlist {
+  id            Int       @id @default(autoincrement())
+  event_id      Int
+  user_id       Int
+  ticket_count  Int       @default(1)
+  position      Int
+  status        String    @default("waiting") // waiting | promoted | expired | cancelled
+  notified_at   DateTime?
+  promoted_at   DateTime?
+  expires_at    DateTime?
+  created_at    DateTime  @default(now())
+  event         Event     @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([event_id, user_id])
+  @@index([event_id, status, position])
+}
+
+model RazorpayWebhookEvent {
+  id           Int      @id @default(autoincrement())
+  event_id     String   @unique // Razorpay's x-razorpay-event-id header
+  event_type   String   // e.g. payment.captured, payment.failed, refund.created
+  payload      Json?
+  status       String   @default("received") // received | processed | failed
+  processed    Boolean  @default(false)
+  processed_at DateTime?
+  error        String?
+  received_at  DateTime @default(now())
+
+  @@index([event_type, processed])
+  @@index([status])
 }
 
 model Notification {

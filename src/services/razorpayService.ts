@@ -73,3 +73,61 @@ export function verifyRazorpaySignature(input: {
 
   return digest === input.razorpaySignature;
 }
+
+/**
+ * Phase 5 — Refund a captured payment.
+ * Returns Razorpay refund object on success.
+ */
+export async function refundRazorpayPayment(params: {
+  paymentId: string;
+  amountPaise?: number;        // omit for full refund
+  notes?: Record<string, string>;
+  speed?: 'normal' | 'optimum';
+}): Promise<{
+  id: string;
+  payment_id: string;
+  amount: number;
+  currency: string;
+  status: string;
+}> {
+  const client = getRazorpayClient();
+  const body: any = { speed: params.speed || 'normal' };
+  if (params.amountPaise !== undefined) body.amount = params.amountPaise;
+  if (params.notes) body.notes = params.notes;
+  const refund = await client.payments.refund(params.paymentId, body);
+  return refund;
+}
+
+/**
+ * Phase 5 — Verify a Razorpay webhook signature.
+ * Razorpay sends the signature in `X-Razorpay-Signature`. The expected
+ * value is HMAC-SHA256(rawBody, RAZORPAY_WEBHOOK_SECRET).
+ *
+ * IMPORTANT: caller must pass the EXACT raw request body string.
+ * If body has been parsed by express.json() the signature WILL FAIL.
+ */
+export function verifyRazorpayWebhookSignature(
+  rawBody: string,
+  signature: string,
+): boolean {
+  const secret =
+    process.env.RAZORPAY_WEBHOOK_SECRET_TEST ||
+    process.env.RAZORPAY_WEBHOOK_SECRET;
+  if (!secret) {
+    throw new Error('Razorpay webhook secret not configured');
+  }
+  if (!signature) return false;
+  const digest = crypto
+    .createHmac('sha256', secret)
+    .update(rawBody)
+    .digest('hex');
+  // timing-safe compare
+  try {
+    const a = Buffer.from(digest, 'hex');
+    const b = Buffer.from(signature, 'hex');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}

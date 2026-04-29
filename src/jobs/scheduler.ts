@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import { cancelExpiredPromotions } from "./expiryJob";
 import { checkPushReceipts } from "../utils/push";
+import { dispatchEventReminders } from "./eventReminderJob";
 
 /**
  * Registers all scheduled jobs.
@@ -25,7 +26,16 @@ export function startScheduledJobs(): void {
     }
   });
 
+  // Phase 5 — Event reminders every 30 minutes (24h + 2h windows).
+  cron.schedule("*/30 * * * *", async () => {
+    try {
+      await dispatchEventReminders();
+    } catch (err) {
+      console.error("[CRON] Event reminder job failed:", err);
+    }
+  });
+
   console.log(
-    "[CRON] Scheduled jobs registered (expiry: every hour | push receipts: every 30 min)",
+    "[CRON] Scheduled jobs registered (expiry: every hour | push receipts: every 30 min | event reminders: every 30 min)",
   );
 }
