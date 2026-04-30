@@ -29,6 +29,7 @@ import groupRoutes from "./routes/groups";
 import messageRoutes from "./routes/messages";
 import notificationRoutes from "./routes/notifications";
 import { initSocketService } from "./services/socketService";
+import webhookRoutes from "./routes/webhooks";
 
 const app = express();
 const httpServer = createServer(app);
@@ -46,6 +47,12 @@ setIo(io);
 
 // Middleware
 app.use(cors());
+
+// Webhooks MUST be mounted BEFORE express.json() so handlers receive
+// the raw body needed for signature verification. Inside webhooks.ts each
+// route uses its own raw body parser.
+app.use("/api/webhooks", webhookRoutes);
+
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
