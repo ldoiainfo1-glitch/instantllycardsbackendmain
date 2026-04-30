@@ -11,12 +11,39 @@ import {
 } from "../services/razorpayService";
 import { getIO } from "../services/socketService";
 import { sendExpoPushNotification } from "../utils/push";
+import { Prisma } from "@prisma/client";
+import { decorateEvent, decorateEvents } from "../utils/eventDecorator";
+import { logger } from "../utils/logger";
 
 function parseTicketCount(input: unknown): number {
   const count =
     input === undefined || input === null ? 1 : parseInt(String(input), 10);
   if (!Number.isFinite(count) || count <= 0) return 1;
   return count;
+}
+
+/**
+ * Strict integer ticket_count parser used by the tier-aware flow.
+ * Rejects: undefined, null, NaN, non-integer, <= 0, > 100.
+ * Returns null on invalid — caller MUST 400 the request.
+ *
+ * Legacy `parseTicketCount` keeps its silent-coerce-to-1 behavior so
+ * existing 900+ events on the legacy register flow are unaffected.
+ */
+function parseStrictTicketCount(input: unknown): number | null {
+  if (input === undefined || input === null) return null;
+  const raw = typeof input === "number" ? input : parseInt(String(input), 10);
+  if (!Number.isFinite(raw)) return null;
+  if (!Number.isInteger(raw)) return null;
+  if (raw <= 0) return null;
+  if (raw > 100) return null; // hard ceiling — sanity guard
+  return raw;
+}
+
+function parseOptionalId(input: unknown): number | null {
+  if (input === undefined || input === null || input === "") return null;
+  const n = parseInt(String(input), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function calculateTicketAmountPaise(
@@ -99,13 +126,14 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
               full_name: true,
             },
           },
+          ticket_tiers: { orderBy: { sort_order: "asc" } },
           _count: { select: { registrations: true } },
         },
       }),
       prisma.event.count({ where }),
     ]);
     console.log("[listEvents] returned", events.length, "events of", total, "total");
-    res.json({ data: events, page, limit, total });
+    res.json({ data: decorateEvents(events as any[]), page, limit, total });
   } catch (err) {
     console.error("[listEvents] ERROR:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -114,7 +142,9 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
 
 export async function getEvent(req: Request, res: Response): Promise<void> {
   const id = paramInt(req.params.id);
-  console.log("[getEvent] id:", id);
+  // Monitoring hook — captured by log aggregator for p95/p99 perf tracking.
+  const _t0 = Date.now();
+  logger.debug("PERF_EVENT_DETAIL_FETCH_START", { eventId: id });
   try {
     const event = await prisma.event.findUnique({
       where: { id },
@@ -128,26 +158,36 @@ export async function getEvent(req: Request, res: Response): Promise<void> {
             phone: true,
           },
         },
+        ticket_tiers: { orderBy: { sort_order: "asc" } },
         _count: { select: { registrations: true } },
       },
     });
     if (!event) {
-      console.log("[getEvent] not found for id:", id);
+      logger.warn("EVENT_NOT_FOUND", { eventId: id });
       res.status(404).json({ error: "Not found" });
       return;
     }
-    console.log(
-      "[getEvent] found:",
-      event.id,
-      event.title,
-      "status:",
-      event.status,
-      "price:",
-      event.ticket_price,
-    );
-    res.json(event);
-  } catch (err) {
-    console.error("[getEvent] ERROR:", err);
+    // Fire-and-forget atomic views increment (doesn't block response).
+    // Atomic SQL: UPDATE "Event" SET "views_count" = "views_count" + 1 WHERE id = ?
+    prisma.event
+      .update({ where: { id }, data: { views_count: { increment: 1 } } })
+      .catch((e) => logger.error("VIEWS_INCREMENT_FAILED", {
+        eventId: id,
+        err: String(e?.message ?? e).slice(0, 200),
+      }));
+    res.json(decorateEvent(event as any));
+    logger.debug("PERF_EVENT_DETAIL_FETCH", {
+      eventId: id,
+      durationMs: Date.now() - _t0,
+      hasRealTiers:
+        Array.isArray((event as any).ticket_tiers) &&
+        (event as any).ticket_tiers.length > 0,
+    });
+  } catch (err: any) {
+    logger.error("EVENT_DETAIL_FETCH_ERROR", {
+      eventId: id,
+      err: String(err?.message ?? err).slice(0, 200),
+    });
     res.status(500).json({ error: "Internal server error" });
   }
 }
@@ -178,10 +218,11 @@ export async function listMyEvents(
         business_promotion: {
           select: { id: true, business_name: true, business_card_id: true },
         },
+        ticket_tiers: { orderBy: { sort_order: "asc" } },
       },
     });
     console.log("[listMyEvents] returned", events.length, "events");
-    res.json(events);
+    res.json(decorateEvents(events as any[]));
   } catch (err) {
     console.error("[listMyEvents] ERROR:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -292,10 +333,11 @@ export async function createEvent(
           select: { id: true, business_name: true, business_card_id: true },
         },
         business: { select: { id: true, company_name: true } },
+        ticket_tiers: { orderBy: { sort_order: "asc" } },
       },
     });
     console.log("[createEvent] success — event.id:", event.id);
-    res.status(201).json(event);
+    res.status(201).json(decorateEvent(event as any));
   } catch (err) {
     console.error("[createEvent] prisma error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -367,9 +409,13 @@ export async function updateEvent(
     }
     console.log("[updateEvent] applying data:", JSON.stringify(data));
 
-    const updated = await prisma.event.update({ where: { id }, data });
+    const updated = await prisma.event.update({
+      where: { id },
+      data,
+      include: { ticket_tiers: { orderBy: { sort_order: "asc" } } },
+    });
     console.log("[updateEvent] success — event:", updated.id, updated.title);
-    res.json(updated);
+    res.json(decorateEvent(updated as any));
   } catch (err) {
     console.error("[updateEvent] ERROR:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -381,7 +427,19 @@ export async function registerForEvent(
   res: Response,
 ): Promise<void> {
   const eventId = paramInt(req.params.id);
-  const { ticket_count, payment } = req.body;
+  const { ticket_count, payment, tier_id } = req.body;
+  const tierIdNum = parseOptionalId(tier_id);
+
+  // ────────────────────────────────────────────────────────────────────
+  // Phase 3 — Tier-aware register flow.
+  // Only triggered when caller passed `tier_id`. Otherwise we fall through
+  // to the EXISTING legacy logic below — left 100% untouched.
+  // ────────────────────────────────────────────────────────────────────
+  if (tierIdNum) {
+    await registerForEventWithTier(req, res, eventId, tierIdNum);
+    return;
+  }
+
   console.log(
     "[registerForEvent] eventId:",
     eventId,
@@ -571,6 +629,14 @@ export async function registerForEvent(
     "paymentStatus:",
     paymentStatus,
   );
+  logger.info("EVENT_REGISTRATION_SUCCESS", {
+    userId: req.user!.userId,
+    eventId,
+    registrationId: registration.id,
+    ticketCount: count,
+    paymentStatus,
+    legacy: true,
+  });
 
   // Notify event organizer in real-time
   try {
@@ -620,6 +686,14 @@ export async function createEventPaymentIntent(
 ): Promise<void> {
   const eventId = paramInt(req.params.id);
   const count = parseTicketCount(req.body?.ticket_count);
+  const tierIdNum = parseOptionalId(req.body?.tier_id);
+
+  // Phase 3 — tier-aware intent. Falls through to legacy path when no tier.
+  if (tierIdNum) {
+    await createTierPaymentIntent(req, res, eventId, tierIdNum, count);
+    return;
+  }
+
   console.log(
     "[createPaymentIntent] eventId:",
     eventId,
@@ -890,6 +964,62 @@ export async function verifyRegistration(
       "paymentStatus:",
       registration.payment_status,
     );
+
+    // ── Phase 5: Check-in handling ─────────────────────────────────
+    // First successful scan: flip checked_in fields. Repeat scans return
+    // already_used=true. Refunded / cancelled regs are rejected.
+    if (registration.refund_status === "refunded" || registration.cancelled_at) {
+      res.status(410).json({
+        error: "Registration is cancelled or refunded",
+        code: "REGISTRATION_CANCELLED",
+        registration_id: registration.id,
+      });
+      return;
+    }
+
+    let alreadyUsed = false;
+    let checkedInAt: Date | null = registration.checked_in_at ?? null;
+    let checkedInBy: number | null = registration.checked_in_by ?? null;
+    if (registration.checked_in) {
+      alreadyUsed = true;
+      console.log(
+        "[verifyRegistration] ALREADY_USED — regId:",
+        registration.id,
+        "checked_in_at:",
+        registration.checked_in_at,
+      );
+    } else {
+      // Atomic flip: only update if checked_in is still false. Stops two
+      // organizers double-scanning the same QR from both succeeding.
+      const updated: number = await prisma.$executeRaw(
+        Prisma.sql`UPDATE "EventRegistration"
+                   SET "checked_in"    = true,
+                       "checked_in_at" = NOW(),
+                       "checked_in_by" = ${req.user!.userId}
+                   WHERE "id" = ${registration.id}
+                     AND "checked_in" = false`,
+      );
+      if (updated === 0) {
+        // Lost the race — re-read to return the canonical timestamp.
+        const fresh = await prisma.eventRegistration.findUnique({
+          where: { id: registration.id },
+          select: { checked_in_at: true, checked_in_by: true },
+        });
+        alreadyUsed = true;
+        checkedInAt = fresh?.checked_in_at ?? null;
+        checkedInBy = fresh?.checked_in_by ?? null;
+      } else {
+        checkedInAt = new Date();
+        checkedInBy = req.user!.userId;
+        console.log(
+          "[verifyRegistration] CHECKED_IN — regId:",
+          registration.id,
+          "by:",
+          req.user!.userId,
+        );
+      }
+    }
+
     res.json({
       registration_id: registration.id,
       qr_code: registration.qr_code,
@@ -899,9 +1029,543 @@ export async function verifyRegistration(
       registered_at: registration.registered_at,
       user: registration.user,
       event: registration.event,
+      // Phase 5 — check-in fields (additive, backward-compat)
+      checked_in: true,
+      checked_in_at: checkedInAt,
+      checked_in_by: checkedInBy,
+      already_used: alreadyUsed,
     });
   } catch (err) {
     console.error("[verifyRegistration] ERROR:", err);
     res.status(500).json({ error: "Internal server error" });
   }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Phase 3 — Tier-aware payment intent + register
+// ════════════════════════════════════════════════════════════════════════
+
+/**
+ * Tier-aware payment intent.
+ * - Validates the tier exists, belongs to the event, is active and on sale.
+ * - Soft capacity pre-check (tier + event). Hard check happens atomically
+ *   inside the register transaction.
+ * - amount = tier.price * ticket_count
+ */
+async function createTierPaymentIntent(
+  req: AuthRequest,
+  res: Response,
+  eventId: number,
+  tierId: number,
+  countRaw: number,
+): Promise<void> {
+  // ── Defensive: strict count validation (rejects NaN, non-int, <=0, >100)
+  const strictCount = parseStrictTicketCount(req.body?.ticket_count);
+  if (strictCount === null) {
+    res.status(400).json({ error: "Invalid ticket_count" });
+    return;
+  }
+  const count = strictCount;
+  void countRaw; // legacy param kept for signature stability
+
+  console.log(
+    "[createPaymentIntent.tier] eventId:",
+    eventId,
+    "tierId:",
+    tierId,
+    "userId:",
+    req.user!.userId,
+    "count:",
+    count,
+  );
+
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    include: { ticket_tiers: { where: { id: tierId } } },
+  });
+  if (!event) {
+    res.status(404).json({ error: "Event not found" });
+    return;
+  }
+  // Hard event-status gate
+  if (event.status !== "active" || event.cancelled_at) {
+    res.status(400).json({ error: "Event is not active" });
+    return;
+  }
+  if (event.is_legacy) {
+    res.status(400).json({
+      error:
+        "This event does not support ticket tiers. Use the legacy register flow.",
+    });
+    return;
+  }
+
+  const tier = event.ticket_tiers[0];
+  if (!tier || tier.event_id !== eventId) {
+    res.status(404).json({ error: "Ticket tier not found" });
+    return;
+  }
+  if (!tier.is_active) {
+    res.status(400).json({ error: "Ticket tier is not active" });
+    return;
+  }
+
+  const now = new Date();
+  if (tier.sale_starts_at && now < tier.sale_starts_at) {
+    res.status(400).json({ error: "Ticket sale has not started" });
+    return;
+  }
+  if (tier.sale_ends_at && now > tier.sale_ends_at) {
+    res.status(400).json({ error: "Ticket sale has ended" });
+    return;
+  }
+  if (count < tier.min_per_order) {
+    res.status(400).json({
+      error: `Minimum ${tier.min_per_order} tickets per order for this tier`,
+    });
+    return;
+  }
+  if (count > tier.max_per_order) {
+    res.status(400).json({
+      error: `Maximum ${tier.max_per_order} tickets per order for this tier`,
+    });
+    return;
+  }
+
+  // Soft capacity pre-checks (atomic guard still runs at register time)
+  if (
+    tier.quantity_total !== null &&
+    tier.quantity_sold + count > tier.quantity_total
+  ) {
+    logger.warn("EVENT_REGISTRATION_FAILED", {
+      code: "TIER_SOLD_OUT",
+      userId: req.user?.userId,
+      eventId,
+      tierId: tier.id,
+      count,
+    });
+    res.status(409).json({ error: "Tier sold out", code: "TIER_SOLD_OUT" });
+    return;
+  }
+  if (
+    event.max_attendees &&
+    event.attendee_count + count > event.max_attendees
+  ) {
+    logger.warn("EVENT_REGISTRATION_FAILED", {
+      code: "EVENT_FULL",
+      userId: req.user?.userId,
+      eventId,
+      tierId: tier.id,
+      count,
+    });
+    res.status(409).json({ error: "Event is full", code: "EVENT_FULL" });
+    return;
+  }
+
+  // Duplicate registration guard (per-user per-event)
+  const existing = await prisma.eventRegistration.findFirst({
+    where: { event_id: eventId, user_id: req.user!.userId },
+    select: { id: true },
+  });
+  if (existing) {
+    res.status(409).json({ error: "Already registered" });
+    return;
+  }
+
+  const unitPrice = Number(tier.price ?? 0) || 0;
+  // Free tier: payment intent is meaningless — caller should call /register directly.
+  if (unitPrice <= 0) {
+    res.status(400).json({
+      error: "Payment is not required for this tier",
+      code: "FREE_TIER",
+    });
+    return;
+  }
+
+  const amountPaise = Math.round(unitPrice * 100) * count;
+  const receipt = `evt_${eventId}_t${tierId}_u${req.user!.userId}_${Date.now()}`.slice(
+    0,
+    40,
+  );
+
+  try {
+    const order = await createRazorpayOrder({
+      amountPaise,
+      currency: tier.currency || "INR",
+      receipt,
+      notes: {
+        event_id: String(eventId),
+        user_id: String(req.user!.userId),
+        tier_id: String(tierId),
+        ticket_count: String(count),
+      },
+    });
+    console.log(
+      "[createPaymentIntent.tier] SUCCESS — orderId:",
+      order.id,
+      "amount:",
+      order.amount,
+    );
+    res.status(201).json({
+      key_id: getRazorpayPublicKey(),
+      order_id: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      event_id: eventId,
+      event_title: event.title,
+      ticket_count: count,
+      unit_price: unitPrice,
+      tier_id: tierId,
+      tier_name: tier.name,
+    });
+  } catch (err) {
+    console.error("[createPaymentIntent.tier] ERROR:", err);
+    res.status(502).json({ error: "Unable to create payment order" });
+  }
+}
+
+/**
+ * Tier-aware register flow.
+ *
+ * Hard guarantees:
+ *   • Capacity check + increment for BOTH the tier and the event happen
+ *     INSIDE a single $transaction using conditional UPDATE statements
+ *     ("UPDATE … WHERE quantity_sold + N <= quantity_total"). If the WHERE
+ *     fails, the row count is 0 → we throw → tx rolls back. This eliminates
+ *     the read-then-write race.
+ *   • Payment signature is verified BEFORE the transaction. Razorpay order
+ *     amount is re-fetched and compared against `tier.price * count`.
+ *   • Per-user duplicate guarded outside tx; per-payment_id duplicate
+ *     guarded outside tx (DB also has a unique-ish index for safety).
+ */
+async function registerForEventWithTier(
+  req: AuthRequest,
+  res: Response,
+  eventId: number,
+  tierId: number,
+): Promise<void> {
+  const { ticket_count, payment } = req.body;
+
+  // ── Defensive count validation (rejects undefined, NaN, non-int, <=0, >100)
+  const strictCount = parseStrictTicketCount(ticket_count);
+  if (strictCount === null) {
+    res.status(400).json({ error: "Invalid ticket_count" });
+    return;
+  }
+  const count = strictCount;
+  const userId = req.user!.userId;
+
+  console.log(
+    "[registerForEvent.tier] eventId:",
+    eventId,
+    "tierId:",
+    tierId,
+    "userId:",
+    userId,
+    "count:",
+    count,
+    "hasPayment:",
+    !!payment,
+  );
+
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    include: { ticket_tiers: { where: { id: tierId } } },
+  });
+  if (!event) {
+    res.status(404).json({ error: "Event not found" });
+    return;
+  }
+  // Hard event-status gate
+  if (event.status !== "active" || event.cancelled_at) {
+    res.status(400).json({ error: "Event is not active" });
+    return;
+  }
+  if (event.is_legacy) {
+    res.status(400).json({
+      error:
+        "This event does not support ticket tiers. Use the legacy register flow.",
+    });
+    return;
+  }
+  const tier = event.ticket_tiers[0];
+  if (!tier || tier.event_id !== eventId) {
+    res.status(404).json({ error: "Ticket tier not found" });
+    return;
+  }
+  if (!tier.is_active) {
+    res.status(400).json({ error: "Ticket tier is not active" });
+    return;
+  }
+
+  const now = new Date();
+  if (tier.sale_starts_at && now < tier.sale_starts_at) {
+    res.status(400).json({ error: "Ticket sale has not started" });
+    return;
+  }
+  if (tier.sale_ends_at && now > tier.sale_ends_at) {
+    res.status(400).json({ error: "Ticket sale has ended" });
+    return;
+  }
+  if (count < tier.min_per_order) {
+    res.status(400).json({
+      error: `Minimum ${tier.min_per_order} tickets per order for this tier`,
+    });
+    return;
+  }
+  if (count > tier.max_per_order) {
+    res.status(400).json({
+      error: `Maximum ${tier.max_per_order} tickets per order for this tier`,
+    });
+    return;
+  }
+
+  // Per-user duplicate registration (also enforced by DB unique index)
+  const existing = await prisma.eventRegistration.findFirst({
+    where: { event_id: eventId, user_id: userId },
+    select: { id: true },
+  });
+  if (existing) {
+    res
+      .status(409)
+      .json({ error: "Already registered", registration: existing });
+    return;
+  }
+
+  const unitPrice = Number(tier.price ?? 0) || 0;
+  const isPaid = unitPrice > 0;
+  let paymentStatus: string = "not_required";
+  let paymentOrderId: string | null = null;
+  let paymentId: string | null = null;
+  let paymentSignature: string | null = null;
+  let amountPaid: number | null = null;
+
+  if (isPaid) {
+    const razorpayOrderId = payment?.razorpay_order_id;
+    const razorpayPaymentId = payment?.razorpay_payment_id;
+    const razorpaySignature = payment?.razorpay_signature;
+    if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+      res
+        .status(400)
+        .json({ error: "Payment details are required for paid tiers" });
+      return;
+    }
+    const sigOk = verifyRazorpaySignature({
+      razorpayOrderId,
+      razorpayPaymentId,
+      razorpaySignature,
+    });
+    if (!sigOk) {
+      res.status(400).json({ error: "Invalid payment signature" });
+      return;
+    }
+    // Duplicate payment_id guard
+    const dupPay = await prisma.eventRegistration.findFirst({
+      where: { payment_id: razorpayPaymentId },
+      select: { id: true },
+    });
+    if (dupPay) {
+      res
+        .status(409)
+        .json({ error: "Payment already used for another registration" });
+      return;
+    }
+    // Order-id reuse guard — same order_id must not appear elsewhere
+    // (different user / different event / different registration entirely).
+    const dupOrder = await prisma.eventRegistration.findFirst({
+      where: { payment_order_id: razorpayOrderId },
+      select: { id: true, user_id: true, event_id: true },
+    });
+    if (dupOrder) {
+      res.status(409).json({
+        error: "Payment order already used for another registration",
+        code: "ORDER_ID_REUSED",
+      });
+      return;
+    }
+    const expectedPaise = Math.round(unitPrice * 100) * count;
+    try {
+      const order = await fetchRazorpayOrder(razorpayOrderId);
+      if (order.amount !== expectedPaise) {
+        res.status(400).json({ error: "Payment amount mismatch" });
+        return;
+      }
+      paymentStatus = "paid";
+      paymentOrderId = razorpayOrderId;
+      paymentId = razorpayPaymentId;
+      paymentSignature = razorpaySignature;
+      amountPaid = expectedPaise / 100;
+    } catch (err) {
+      console.error("[registerForEvent.tier] razorpay fetch ERROR:", err);
+      res
+        .status(502)
+        .json({ error: "Unable to verify payment order with provider" });
+      return;
+    }
+  }
+  // Else: free tier — payment_* fields stay null, payment_status = "not_required"
+  // No payment validation runs.
+
+  const qrCode = `EVT-${eventId}-${crypto.randomBytes(6).toString("hex")}`;
+
+  // ───────── ATOMIC TRANSACTION ─────────
+  let registrationId: number;
+  try {
+    registrationId = await prisma.$transaction(async (tx) => {
+      // 1. Atomic tier increment (capacity-respecting). If the WHERE fails
+      //    affectedRows = 0 → throw → entire tx rolls back.
+      const tierRows: number = await tx.$executeRaw(
+        Prisma.sql`UPDATE "EventTicketTier"
+                   SET "quantity_sold" = "quantity_sold" + ${count},
+                       "updated_at"    = NOW()
+                   WHERE "id" = ${tierId}
+                     AND "is_active" = true
+                     AND ("quantity_total" IS NULL
+                          OR "quantity_sold" + ${count} <= "quantity_total")`,
+      );
+      if (tierRows === 0) {
+        const err: any = new Error("Tier sold out");
+        err.http = 409;
+        err.code = "TIER_SOLD_OUT";
+        throw err;
+      }
+
+      // 2. Atomic event capacity increment.
+      const eventRows: number = await tx.$executeRaw(
+        Prisma.sql`UPDATE "Event"
+                   SET "attendee_count" = "attendee_count" + ${count}
+                   WHERE "id" = ${eventId}
+                     AND "status" = 'active'
+                     AND "cancelled_at" IS NULL
+                     AND ("max_attendees" IS NULL
+                          OR "attendee_count" + ${count} <= "max_attendees")`,
+      );
+      if (eventRows === 0) {
+        const err: any = new Error("Event capacity reached");
+        err.http = 409;
+        err.code = "EVENT_FULL";
+        throw err;
+      }
+
+      // 3. Create the registration row. DB unique constraint
+      //    (user_id, event_id) catches concurrent duplicate inserts that
+      //    slipped past the pre-tx findFirst check.
+      try {
+        const reg = await tx.eventRegistration.create({
+          data: {
+            event_id: eventId,
+            user_id: userId,
+            ticket_tier_id: tierId,
+            ticket_count: count,
+            qr_code: qrCode,
+            payment_status: paymentStatus,
+            payment_order_id: paymentOrderId,
+            payment_id: paymentId,
+            payment_signature: paymentSignature,
+            amount_paid: amountPaid,
+          },
+        });
+        return reg.id;
+      } catch (e: any) {
+        // P2002 = Prisma unique constraint violation
+        if (e?.code === "P2002") {
+          const err: any = new Error("User already registered for this event");
+          err.http = 409;
+          err.code = "DUPLICATE_REGISTRATION";
+          throw err;
+        }
+        throw e;
+      }
+    });
+  } catch (err: any) {
+    const code = err?.http;
+    if (code === 409) {
+      console.log(
+        "[registerForEvent.tier] tx-reject:",
+        err.code,
+        "user:",
+        userId,
+        "event:",
+        eventId,
+        "tier:",
+        tierId,
+        "count:",
+        count,
+      );
+      res.status(409).json({ error: err.message, code: err.code });
+      return;
+    }
+    console.error("[registerForEvent.tier] tx ERROR:", err);
+    res.status(500).json({ error: "Internal server error" });
+    return;
+  }
+
+  console.log(
+    "[registerForEvent.tier] SUCCESS — regId:",
+    registrationId,
+    "qr:",
+    qrCode,
+    "tier:",
+    tierId,
+  );
+  logger.info("EVENT_REGISTRATION_SUCCESS", {
+    userId,
+    eventId,
+    registrationId,
+    tierId,
+    ticketCount: count,
+    legacy: false,
+  });
+
+  // Notify organizer (best-effort, non-blocking)
+  try {
+    const eventWithBiz = await prisma.event.findUnique({
+      where: { id: eventId },
+      include: { business: { select: { user_id: true } } },
+    });
+    if (eventWithBiz && eventWithBiz.business) {
+      const organizer = await prisma.user.findUnique({
+        where: { id: eventWithBiz.business.user_id },
+        select: { id: true, push_token: true },
+      });
+      const attendee = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+      if (organizer && organizer.id !== userId) {
+        const io = getIO();
+        const payload = {
+          type: "event:registered",
+          eventId,
+          eventTitle: event.title,
+          attendeeName: attendee?.name ?? "Someone",
+          ticketCount: count,
+          tierName: tier.name,
+        };
+        if (io) io.to(`user:${organizer.id}`).emit("event:registered", payload);
+        if (organizer.push_token) {
+          sendExpoPushNotification(
+            organizer.push_token,
+            "New Event Registration",
+            `${attendee?.name ?? "Someone"} registered (${tier.name}) for "${event.title}"`,
+            { screen: "Events" },
+          );
+        }
+      }
+    }
+  } catch {
+    /* non-blocking */
+  }
+
+  // Read the canonical row back so the client gets the persisted values.
+  const registration = await prisma.eventRegistration.findUnique({
+    where: { id: registrationId },
+  });
+
+  // Clean envelope — no duplicated keys.
+  res.status(201).json({
+    registration,
+    qr_code: qrCode,
+    ticket_tier_id: tierId,
+  });
 }

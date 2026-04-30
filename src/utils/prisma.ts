@@ -50,7 +50,16 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter } as any);
 
 // Graceful shutdown — release pooler slots on SIGTERM/SIGINT (PM2 reload, etc.)
+//
+// IMPORTANT: we MUST `process.exit()` after closing the pool. Otherwise the
+// Express server keeps holding the port and continues accepting requests
+// against a dead pool, producing
+//   "Cannot use a pool after calling end on the pool"
+// on every subsequent query.
+let shuttingDown = false;
 const shutdown = async (signal: string) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
   // eslint-disable-next-line no-console
   console.log(`[prisma] ${signal} received, closing DB pool…`);
   try {
@@ -63,8 +72,14 @@ const shutdown = async (signal: string) => {
   } catch {
     /* ignore */
   }
+  // Give logs a tick to flush, then exit.
+  setTimeout(() => process.exit(0), 50).unref();
 };
-process.once('SIGTERM', () => shutdown('SIGTERM'));
-process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => {
+  void shutdown('SIGTERM');
+});
+process.once('SIGINT', () => {
+  void shutdown('SIGINT');
+});
 
 export default prisma;
