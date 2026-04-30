@@ -1,0 +1,1 @@
+ALTER TABLE "EventRegistration" ADD COLUMN IF NOT EXISTS "cancelled_count" INTEGER NOT NULL DEFAULT 0;

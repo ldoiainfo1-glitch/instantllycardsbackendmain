@@ -28,6 +28,7 @@ import {
 import {
   cancelEvent,
   refundRegistration,
+  partialCancelTickets,
 } from '../controllers/eventRefundController';
 import { getEventAnalytics } from '../controllers/eventAnalyticsController';
 
@@ -124,6 +125,12 @@ router.post(
   authenticate,
   requireRole('business', 'admin'),
   h(refundRegistration),
+);
+// Partial ticket cancellation by the ticket holder themselves
+router.post(
+  '/:id/partial-cancel',
+  authenticate,
+  h(partialCancelTickets),
 );
 router.get(
   '/:id/analytics',

@@ -9,12 +9,15 @@ import { getIO } from "../services/socketService";
 import { sendExpoPushNotification } from "../utils/push";
 import { logger } from "../utils/logger";
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * Phase 5 — Refund + Event-cancel.
  *
  * Routes:
- *   POST /events/:id/cancel    — organizer/admin: cancels event + bulk refund
- *   POST /events/:id/refund    — organizer/admin: refund a single registration
+ *   POST /events/:id/cancel              — organizer/admin: cancels event + bulk refund
+ *   POST /events/:id/refund              — organizer/admin: refund a single registration (full)
+ *   POST /events/:id/partial-cancel      — authenticated user: partially cancel N tickets from their own registration
  *
  * Flow guarantees:
  *   • Razorpay refund called BEFORE DB mutation. If Razorpay fails we leave
@@ -92,7 +95,7 @@ async function refundRegistrationInternal(args: {
       Prisma.sql`UPDATE "EventRegistration"
                  SET "refund_status" = 'processing'
                  WHERE "id" = ${reg.id}
-                   AND ("refund_status" IS NULL OR "refund_status" = 'failed')`,
+                   AND ("refund_status" IS NULL OR "refund_status" = 'failed' OR "refund_status" = 'partial_refund')`,
     );
     if (claimed === 0) {
       // Someone else is already processing/refunded. Treat as no-op.
@@ -403,5 +406,260 @@ export async function cancelEvent(
     cancelled_at: new Date(),
     refunds_attempted: results.length,
     refunds: results,
+  });
+}
+
+// ─── Route: POST /events/:id/partial-cancel ──────────────────────────
+// Authenticated user cancels N tickets from their OWN registration.
+// If all remaining active tickets are cancelled, the registration is fully refunded/cancelled.
+
+export async function partialCancelTickets(
+  req: AuthRequest,
+  res: Response,
+): Promise<void> {
+  const eventId = paramInt(req.params.id);
+  const userId = req.user!.userId;
+  const cancelCount = parseInt(String(req.body?.cancel_count ?? ""), 10);
+  const reason = typeof req.body?.reason === "string" ? req.body.reason.slice(0, 500) : undefined;
+
+  if (!Number.isFinite(cancelCount) || cancelCount < 1) {
+    res.status(400).json({ error: "cancel_count must be a positive integer" });
+    return;
+  }
+
+  const regFound = await prisma.eventRegistration.findFirst({
+    where: { event_id: eventId, user_id: userId },
+    select: {
+      id: true,
+      event_id: true,
+      user_id: true,
+      ticket_count: true,
+      cancelled_count: true,
+      payment_status: true,
+      payment_id: true,
+      amount_paid: true,
+      refund_status: true,
+      ticket_tier_id: true,
+      checked_in: true,
+      cancelled_at: true,
+    },
+  });
+
+  if (!regFound) {
+    res.status(404).json({ error: "Registration not found for this event" });
+    return;
+  }
+  let reg = regFound;
+  if (reg.cancelled_at || reg.refund_status === "refunded") {
+    res.status(409).json({ error: "Registration is already fully cancelled or refunded" });
+    return;
+  }
+  if (reg.checked_in) {
+    res.status(409).json({ error: "Cannot cancel tickets that have already been checked in" });
+    return;
+  }
+
+  let activeTickets = reg.ticket_count - (reg.cancelled_count ?? 0);
+  if (cancelCount > activeTickets) {
+    res.status(400).json({
+      error: `Cannot cancel ${cancelCount} tickets — only ${activeTickets} active ticket(s) remaining`,
+      active_tickets: activeTickets,
+    });
+    return;
+  }
+  let isFullCancel = cancelCount === activeTickets;
+
+  // Calculate partial refund amount proportional to the cancelled tickets
+  let refundId: string | null = null;
+  let partialRefundAmount: number | null = null;
+
+  const paymentId = reg.payment_id;
+  const amountPaid = reg.amount_paid;
+  if (reg.payment_status === "paid" && paymentId && amountPaid !== null) {
+    const queueDeadline = Date.now() + 12_000;
+    let claimed = 0;
+    while (Date.now() < queueDeadline) {
+      // Claim processing lock only if row state is unchanged for cancelled_count.
+      // This serializes rapid double-taps and cross-request races.
+      claimed = await prisma.$executeRaw(
+        Prisma.sql`UPDATE "EventRegistration"
+                   SET "refund_status" = 'processing'
+                   WHERE "id" = ${reg.id}
+                     AND "cancelled_count" = ${reg.cancelled_count ?? 0}
+                     AND ("refund_status" IS NULL OR "refund_status" = 'failed' OR "refund_status" = 'partial_refund')`,
+      );
+      if (claimed === 1) break;
+
+      const latest: {
+        ticket_count: number;
+        cancelled_count: number;
+        refund_status: string | null;
+        checked_in: boolean;
+        cancelled_at: Date | null;
+      } | null = await prisma.eventRegistration.findUnique({
+        where: { id: reg.id },
+        select: {
+          ticket_count: true,
+          cancelled_count: true,
+          refund_status: true,
+          checked_in: true,
+          cancelled_at: true,
+        },
+      });
+
+      if (!latest) {
+        res.status(404).json({ error: "Registration not found for this event" });
+        return;
+      }
+      if (latest.cancelled_at || latest.refund_status === "refunded") {
+        res.status(409).json({ error: "Registration is already fully cancelled or refunded" });
+        return;
+      }
+      if (latest.checked_in) {
+        res.status(409).json({ error: "Cannot cancel tickets that have already been checked in" });
+        return;
+      }
+
+      reg = { ...reg, ...latest };
+      activeTickets = reg.ticket_count - (reg.cancelled_count ?? 0);
+      if (cancelCount > activeTickets) {
+        res.status(400).json({
+          error: `Cannot cancel ${cancelCount} tickets — only ${activeTickets} active ticket(s) remaining`,
+          active_tickets: activeTickets,
+        });
+        return;
+      }
+
+      // Another request is actively processing; wait in queue and retry.
+      if (latest.refund_status === "processing") {
+        await sleep(700);
+      } else {
+        // State changed quickly (e.g. another partial just finished); short backoff then retry claim.
+        await sleep(200);
+      }
+    }
+
+    if (claimed === 0) {
+      res.status(409).json({
+        error: "Another partial refund is being processed. Please retry in a few seconds.",
+        code: "REFUND_IN_PROGRESS",
+      });
+      return;
+    }
+
+    // Recompute with latest state after queue wait/claim.
+    activeTickets = reg.ticket_count - (reg.cancelled_count ?? 0);
+    isFullCancel = cancelCount === activeTickets;
+
+    const perTicketAmount = amountPaid / reg.ticket_count;
+    const amountToRefund = Math.round(perTicketAmount * cancelCount * 100); // paise
+
+    try {
+      const refund = await refundRazorpayPayment({
+        paymentId,
+        amountPaise: amountToRefund,
+        notes: { reason: reason ?? `Partial ticket cancellation: ${cancelCount} ticket(s)` },
+      });
+      refundId = refund.id;
+      partialRefundAmount = refund.amount / 100;
+    } catch (err: any) {
+      console.error("[partialCancel] Razorpay ERROR — regId:", reg.id, err?.message ?? err);
+      await prisma.eventRegistration.update({
+        where: { id: reg.id },
+        data: { refund_status: "failed" },
+      });
+      res.status(502).json({ error: "Refund failed at payment provider", code: "REFUND_PROVIDER_FAILED" });
+      return;
+    }
+  }
+
+  // Atomic DB update
+  await prisma.$transaction(async (tx) => {
+    const newCancelledCount = (reg.cancelled_count ?? 0) + cancelCount;
+    await tx.eventRegistration.update({
+      where: { id: reg.id },
+      data: {
+        cancelled_count: newCancelledCount,
+        refund_status: isFullCancel ? "refunded" : (refundId ? "partial_refund" : reg.refund_status),
+        refund_id: refundId ?? undefined,
+        // Keep semantics aligned with other flows: refund_amount = refunded amount for this operation.
+        refund_amount: partialRefundAmount !== null ? partialRefundAmount : undefined,
+        cancelled_at: isFullCancel ? new Date() : undefined,
+        payment_status: isFullCancel && reg.payment_status === "paid" ? "refunded" : reg.payment_status,
+      },
+    });
+
+    // Roll back capacity for cancelled tickets
+    await tx.$executeRaw(
+      Prisma.sql`UPDATE "Event"
+                 SET "attendee_count" = GREATEST(0, "attendee_count" - ${cancelCount})
+                 WHERE "id" = ${reg.event_id}`,
+    );
+    if (reg.ticket_tier_id) {
+      await tx.$executeRaw(
+        Prisma.sql`UPDATE "EventTicketTier"
+                   SET "quantity_sold" = GREATEST(0, "quantity_sold" - ${cancelCount}),
+                       "updated_at"    = NOW()
+                   WHERE "id" = ${reg.ticket_tier_id}`,
+      );
+    }
+  });
+
+  console.log(
+    "[partialCancel] regId:", reg.id,
+    "cancelled:", cancelCount, "of", reg.ticket_count,
+    "isFullCancel:", isFullCancel,
+    "refundId:", refundId,
+  );
+
+  // Best-effort notification
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: reg.user_id },
+      select: { id: true, push_token: true },
+    });
+    const io = getIO();
+    if (io) {
+      io.to(`user:${reg.user_id}`).emit("event:partial_cancelled", {
+        type: "event:partial_cancelled",
+        registrationId: reg.id,
+        eventId: reg.event_id,
+        cancelledCount: cancelCount,
+        refundId,
+        isFullCancel,
+      });
+    }
+    if (user?.push_token) {
+      sendExpoPushNotification(
+        user.push_token,
+        isFullCancel ? "Tickets cancelled & refunded" : `${cancelCount} ticket(s) cancelled`,
+        isFullCancel
+          ? "All your tickets have been cancelled and refunded."
+          : `${cancelCount} ticket(s) cancelled. ${activeTickets - cancelCount} ticket(s) remain.`,
+        { screen: "Events" },
+      );
+    }
+  } catch {/* non-blocking */}
+
+  // If freed capacity allows waitlist promotion
+  if (isFullCancel) {
+    try {
+      await promoteNextEligible(eventId, 10);
+    } catch (e: any) {
+      logger.warn("WAITLIST_PROMOTION_SKIPPED", {
+        eventId,
+        registrationId: reg.id,
+        err: String(e?.message ?? e).slice(0, 200),
+      });
+    }
+  }
+
+  res.json({
+    registration_id: reg.id,
+    cancelled_count: cancelCount,
+    remaining_active_tickets: activeTickets - cancelCount,
+    is_fully_cancelled: isFullCancel,
+    refund_id: refundId,
+    refund_amount: partialRefundAmount,
   });
 }

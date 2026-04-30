@@ -913,7 +913,7 @@ export async function verifyRegistration(
           select: { id: true, name: true, phone: true, profile_picture: true },
         },
       },
-    });
+    }) as any;
 
     if (!registration) {
       console.log("[verifyRegistration] not found for qr_code:", qr_code);
@@ -1024,6 +1024,8 @@ export async function verifyRegistration(
       registration_id: registration.id,
       qr_code: registration.qr_code,
       ticket_count: registration.ticket_count,
+      cancelled_count: (registration as any).cancelled_count ?? 0,
+      active_tickets: registration.ticket_count - ((registration as any).cancelled_count ?? 0),
       payment_status: registration.payment_status,
       amount_paid: registration.amount_paid,
       registered_at: registration.registered_at,
