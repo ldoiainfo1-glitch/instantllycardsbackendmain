@@ -91,7 +91,7 @@ export async function refundRazorpayPayment(params: {
   status: string;
 }> {
   const client = getRazorpayClient();
-  const body: any = { speed: params.speed || 'normal' };
+  const body: any = { speed: params.speed || 'optimum' };
   if (params.amountPaise !== undefined) body.amount = params.amountPaise;
   if (params.notes) body.notes = params.notes;
   const refund = await client.payments.refund(params.paymentId, body);

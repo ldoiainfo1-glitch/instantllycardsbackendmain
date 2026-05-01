@@ -2,6 +2,9 @@ import { Response } from "express";
 import prisma from "../utils/prisma";
 import { AuthRequest } from "../middleware/auth";
 import { paramInt } from "../utils/params";
+import { getIO } from "../services/socketService";
+import { sendExpoPushNotification } from "../utils/push";
+import { notify } from "../utils/notify";
 
 /**
  * Phase 3 — EventTicketTier CRUD.
@@ -329,6 +332,9 @@ export async function updateTicketTier(
     return;
   }
 
+  // Capture old capacity so we can detect an increase after the update.
+  const oldQuantityTotal = tier.quantity_total;
+
   try {
     const updated = await prisma.eventTicketTier.update({
       where: { id: tierId },
@@ -336,6 +342,57 @@ export async function updateTicketTier(
     });
     console.log("[updateTicketTier] SUCCESS — tierId:", updated.id);
     res.json(updated);
+
+    // Notify waitlisted users if this tier's capacity grew and has free seats.
+    const newQty = updated.quantity_total;
+    const capacityIncreased =
+      newQty !== null &&
+      (oldQuantityTotal === null || newQty > oldQuantityTotal) &&
+      newQty > updated.quantity_sold;
+
+    if (capacityIncreased) {
+      try {
+        const waitlisted = await prisma.eventWaitlist.findMany({
+          where: { event_id: eventId, status: "waiting" },
+          select: { user_id: true },
+        });
+
+        if (waitlisted.length > 0) {
+          const userIds = waitlisted.map((w) => w.user_id);
+          const users = await prisma.user.findMany({
+            where: { id: { in: userIds }, push_token: { not: null } },
+            select: { id: true, push_token: true },
+          });
+
+          const io = getIO();
+          for (const u of users) {
+            if (io) {
+              io.to(`user:${u.id}`).emit("event:tickets_available", {
+                type: "event:tickets_available",
+                eventId,
+                tierId: updated.id,
+                tierName: updated.name,
+                eventTitle: event.title,
+              });
+            }
+            await notify({
+              pushToken: u.push_token,
+              userId: u.id,
+              title: "🎟️ Tickets Are Live!",
+              body: `"${updated.name}" tickets are available again for "${event.title}"! You're on the waitlist — register now before they sell out!`,
+              type: "event_tickets_available",
+              data: { screen: "Events", eventId },
+            });
+          }
+          console.log(
+            `[updateTicketTier] notified ${users.length} waitlisted user(s) — tier "${updated.name}" for event ${eventId}`,
+          );
+        }
+      } catch (notifyErr) {
+        console.error("[updateTicketTier] waitlist notify ERROR:", notifyErr);
+        /* non-blocking */
+      }
+    }
   } catch (err) {
     console.error("[updateTicketTier] ERROR:", err);
     res.status(500).json({ error: "Internal server error" });

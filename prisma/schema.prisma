@@ -416,6 +416,7 @@ model EventRegistration {
   event_id          Int
   user_id           Int
   ticket_count      Int      @default(1)
+  cancelled_count   Int      @default(0) // Number of tickets cancelled (partial refund support)
   registered_at     DateTime @default(now())
   qr_code           String?
   payment_status    String   @default("not_required")

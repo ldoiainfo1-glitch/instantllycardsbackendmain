@@ -6,6 +6,7 @@ import { AuthRequest } from "../middleware/auth";
 import { paramInt } from "../utils/params";
 import { getIO } from "../services/socketService";
 import { sendExpoPushNotification } from "../utils/push";
+import { notify } from "../utils/notify";
 import { logger } from "../utils/logger";
 
 /**
@@ -273,6 +274,7 @@ export async function joinWaitlist(
     where: { id: eventId },
     select: {
       id: true,
+      title: true,
       status: true,
       cancelled_at: true,
       max_attendees: true,
@@ -354,6 +356,31 @@ export async function joinWaitlist(
       },
       position: row.position,
     });
+
+    // Notify the user they've joined the waitlist (best-effort, non-blocking)
+    try {
+      const joiningUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { push_token: true },
+      });
+      const io = getIO();
+      if (io) io.to(`user:${userId}`).emit("event:waitlist_joined", {
+        type: "event:waitlist_joined",
+        eventId,
+        eventTitle: event!.title,
+        position: row.position,
+      });
+      await notify({
+        pushToken: joiningUser?.push_token,
+        userId,
+        title: "Added to Waitlist",
+        body: `You've joined the waitlist for "${event!.title}". We'll notify you the moment tickets become available!`,
+        type: "event_waitlist_joined",
+        data: { screen: "Events" },
+      });
+    } catch {
+      /* non-blocking */
+    }
   } catch (e: any) {
     // Unique violation → already on waitlist
     if (
@@ -457,14 +484,14 @@ export async function promoteWaitlist(
       "event:waitlist_promoted",
       payload,
     );
-    if (promotedUser?.push_token) {
-      sendExpoPushNotification(
-        promotedUser.push_token,
-        "You're in!",
-        `A seat opened up for "${event.title}". You've been promoted from the waitlist.`,
-        { screen: "Events" },
-      );
-    }
+    await notify({
+      pushToken: promotedUser?.push_token,
+      userId: result.promoted_user_id,
+      title: "You're in!",
+      body: `Tickets are live again for "${event.title}"! You've been moved off the waitlist — register fast before they sell out!`,
+      type: "event_waitlist_promoted",
+      data: { screen: "Events" },
+    });
   } catch {
     /* non-blocking */
   }
