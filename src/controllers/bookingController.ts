@@ -4,6 +4,7 @@ import { AuthRequest } from '../middleware/auth';
 import { paramInt, queryInt } from '../utils/params';
 import { getIO } from '../services/socketService';
 import { sendExpoPushNotification } from '../utils/push';
+import { notify } from '../utils/notify';
 
 export async function listMyBookings(req: AuthRequest, res: Response): Promise<void> {
   const page = queryInt(req.query.page, 1);
@@ -166,9 +167,14 @@ export async function createBooking(req: AuthRequest, res: Response): Promise<vo
         const io = getIO();
         const payload = { type: 'booking:created', bookingId: booking.id, businessName: booking.business_name, customerName: customer_name || 'A customer' };
         if (io) io.to(`user:${businessOwner.id}`).emit('booking:created', payload);
-        if (businessOwner.push_token) {
-          sendExpoPushNotification(businessOwner.push_token, 'New Booking', `${customer_name || 'A customer'} booked ${booking.business_name}`, { screen: 'Bookings' });
-        }
+        await notify({
+          pushToken: businessOwner.push_token,
+          userId: businessOwner.id,
+          title: 'New Booking',
+          body: `${customer_name || 'A customer'} booked ${booking.business_name}`,
+          type: 'booking_created',
+          data: { screen: 'Bookings' },
+        });
       }
     }
   } catch { /* non-blocking */ }
@@ -214,9 +220,14 @@ export async function updateBookingStatus(req: AuthRequest, res: Response): Prom
         const io = getIO();
         const payload = { type: 'booking:updated', bookingId: id, status, businessName: (booking as any).business_name };
         if (io) io.to(`user:${notifyUser.id}`).emit('booking:updated', payload);
-        if (notifyUser.push_token) {
-          sendExpoPushNotification(notifyUser.push_token, 'Booking Updated', `Your booking has been ${status}`, { screen: 'Bookings' });
-        }
+        await notify({
+          pushToken: notifyUser.push_token,
+          userId: notifyUser.id,
+          title: 'Booking Updated',
+          body: `Your booking has been ${status}`,
+          type: 'booking_updated',
+          data: { screen: 'Bookings' },
+        });
       }
     }
   } catch { /* non-blocking */ }

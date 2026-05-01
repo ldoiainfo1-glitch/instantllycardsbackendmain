@@ -1164,6 +1164,31 @@ export async function verifyRegistration(
           "by:",
           req.user!.userId,
         );
+        // Notify the ticket holder they have been checked in
+        try {
+          const ticketHolder = await prisma.user.findUnique({
+            where: { id: registration.user_id },
+            select: { push_token: true },
+          });
+          if (ticketHolder) {
+            const eventTitle = registration.event?.title ?? "the event";
+            await notify({
+              userId: registration.user_id,
+              pushToken: ticketHolder.push_token ?? undefined,
+              title: "✅ You're Checked In!",
+              body: `Your ticket for "${eventTitle}" has been scanned. Enjoy the event!`,
+              type: "EVENT_CHECKIN",
+            });
+          }
+          // Real-time socket push so the mobile UI updates instantly
+          getIO()?.to(`user:${registration.user_id}`).emit("event:checkin", {
+            registrationId: registration.id,
+            eventId: registration.event_id,
+            eventName: registration.event?.title ?? null,
+          });
+        } catch (notifyErr) {
+          console.error("[verifyRegistration] check-in notify failed:", notifyErr);
+        }
       }
     }
 
