@@ -108,6 +108,8 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
   const category = req.query.category as string | undefined;
   const search = req.query.search as string | undefined;
   const city = req.query.city as string | undefined;
+  const dateStr = req.query.date as string | undefined; // format: YYYY-MM-DD
+  const priceType = req.query.priceType as string | undefined; // "free" or "paid"
   console.log(
     "[listEvents] page:",
     page,
@@ -119,6 +121,10 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
     category,
     "city:",
     city,
+    "date:",
+    dateStr,
+    "priceType:",
+    priceType,
   );
 
   const where: any = { status: "active" };
@@ -159,8 +165,28 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
     where.category = { contains: category, mode: "insensitive" };
   }
 
+  // Date filter: match events on the specified date (YYYY-MM-DD)
+  if (dateStr) {
+    try {
+      const filterDate = new Date(dateStr);
+      if (!Number.isNaN(filterDate.getTime())) {
+        // Create range for the full day in UTC
+        const dayStart = new Date(Date.UTC(
+          filterDate.getUTCFullYear(),
+          filterDate.getUTCMonth(),
+          filterDate.getUTCDate()
+        ));
+        const dayEnd = new Date(dayStart);
+        dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+        where.date = { gte: dayStart, lt: dayEnd };
+      }
+    } catch (e) {
+      console.warn("[listEvents] invalid date format:", dateStr);
+    }
+  }
+
   try {
-    const [events, total] = await Promise.all([
+    let [events, total] = await Promise.all([
       prisma.event.findMany({
         where,
         skip: (page - 1) * limit,
@@ -181,6 +207,17 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
       }),
       prisma.event.count({ where }),
     ]);
+
+    // Price type filter (free vs paid) — done in memory since it depends on tier prices
+    if (priceType === "free" || priceType === "paid") {
+      events = events.filter((e) => {
+        const hasPaidTier = (e.ticket_tiers as any[]).some((t: any) => t.price > 0);
+        return priceType === "free" ? !hasPaidTier : hasPaidTier;
+      });
+      // Recalculate total after filtering
+      total = events.length;
+    }
+
     console.log("[listEvents] returned", events.length, "events of", total, "total");
     res.json({ data: decorateEvents(events as any[]), page, limit, total });
   } catch (err) {
