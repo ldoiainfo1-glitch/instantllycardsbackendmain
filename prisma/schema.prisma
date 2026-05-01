@@ -397,6 +397,9 @@ model Event {
   // Phase 5 — reminder dispatch flags (per-event, set once)
   reminder_24h_sent_at  DateTime?
   reminder_2h_sent_at   DateTime?
+  // Media
+  company_logo          String?
+  venue_images          String[]
   business              BusinessCard?       @relation(fields: [business_id], references: [id], onDelete: SetNull)
   business_promotion    BusinessPromotion?  @relation("BusinessPromotionEvents", fields: [business_promotion_id], references: [id], onDelete: Cascade)
   registrations         EventRegistration[]

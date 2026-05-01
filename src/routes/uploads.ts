@@ -85,4 +85,29 @@ router.post(
   }
 );
 
+// Event media: company logo (single) or venue images (up to 5)
+router.post(
+  '/event-media',
+  authenticate,
+  upload.single('file'),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: 'No file provided' });
+        return;
+      }
+      const userId = (req as AuthRequest).user!.userId;
+      const folder = (req.query.folder as string) === 'venue' ? 'event-venue' : 'event-logos';
+      const ext = req.file.originalname?.split('.').pop() || 'jpg';
+      const rand = Math.random().toString(36).slice(2, 10);
+      const key = `${folder}/${userId}/${Date.now()}-${rand}.${ext}`;
+      const url = await uploadToS3(req.file.buffer, key, req.file.mimetype);
+      res.json({ url });
+    } catch (err: any) {
+      console.error('[Upload] Event media upload failed:', err.message);
+      res.status(500).json({ error: 'Upload failed' });
+    }
+  }
+);
+
 export default router;
