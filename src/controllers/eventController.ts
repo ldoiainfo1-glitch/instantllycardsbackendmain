@@ -127,7 +127,10 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
     priceType,
   );
 
-  const where: any = { status: "active" };
+  const where: any = {
+    status: "active",
+    date: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+  };
 
   if (search) {
     const searchFilter = [
@@ -191,7 +194,7 @@ export async function listEvents(req: Request, res: Response): Promise<void> {
         where,
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: { date: "asc" },
+        orderBy: [{ date: "asc" }, { id: "desc" }],
         include: {
           business: {
             select: {
@@ -325,11 +328,14 @@ export async function createEvent(
     title,
     description,
     date,
+    end_date,
     time,
     location,
     image_url,
     ticket_price,
     max_attendees,
+    company_logo,
+    venue_images,
   } = req.body;
 
   console.log("[createEvent] body:", JSON.stringify(req.body));
@@ -407,12 +413,15 @@ export async function createEvent(
         title,
         description: description || null,
         date: new Date(date),
+        end_date: end_date ? new Date(end_date) : null,
         time,
         location: location || null,
         image_url: image_url || null,
         ticket_price: ticket_price ? parseFloat(ticket_price) : null,
         max_attendees: max_attendees ? parseInt(max_attendees, 10) : null,
         status: "active",
+        company_logo: company_logo || null,
+        venue_images: Array.isArray(venue_images) ? venue_images : [],
       },
       include: {
         business_promotion: {
@@ -426,7 +435,8 @@ export async function createEvent(
     res.status(201).json(decorateEvent(event as any));
   } catch (err) {
     console.error("[createEvent] prisma error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    const detail = (err as any)?.message ?? String(err);
+    res.status(500).json({ error: "Internal server error", detail });
   }
 }
 
@@ -476,17 +486,21 @@ export async function updateEvent(
       "title",
       "description",
       "date",
+      "end_date",
       "time",
       "location",
       "image_url",
       "ticket_price",
       "max_attendees",
       "status",
+      "company_logo",
+      "venue_images",
     ];
     const data: any = {};
     for (const key of allowedFields) {
       if (req.body[key] !== undefined) {
-        if (key === "date") data[key] = new Date(req.body[key]);
+        if (key === "date" || key === "end_date") data[key] = req.body[key] ? new Date(req.body[key]) : null;
+        else if (key === "venue_images") data[key] = Array.isArray(req.body[key]) ? req.body[key] : [];
         else if (key === "ticket_price") data[key] = parseFloat(req.body[key]);
         else if (key === "max_attendees")
           data[key] = parseInt(req.body[key], 10);
@@ -1010,7 +1024,7 @@ export async function getMyRegistrations(
   try {
     const registrations = await prisma.eventRegistration.findMany({
       where: { user_id: req.user!.userId },
-      include: { event: true },
+      include: { event: true, ticket_tier: true },
       orderBy: { registered_at: "desc" },
     });
     console.log(
@@ -1743,12 +1757,10 @@ async function registerForEventWithTier(
   // Read the canonical row back so the client gets the persisted values.
   const registration = await prisma.eventRegistration.findUnique({
     where: { id: registrationId },
+    include: { ticket_tier: true },
   });
 
-  // Clean envelope — no duplicated keys.
-  res.status(201).json({
-    registration,
-    qr_code: qrCode,
-    ticket_tier_id: tierId,
-  });
+  // Flat envelope — matches legacy registerForEvent shape so the client
+  // can use a single transformResponse for both flows.
+  res.status(201).json({ ...registration, qr_code: qrCode });
 }
