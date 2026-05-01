@@ -7,6 +7,7 @@ import { refundRazorpayPayment } from "../services/razorpayService";
 import { promoteNextEligible } from "./waitlistController";
 import { getIO } from "../services/socketService";
 import { sendExpoPushNotification } from "../utils/push";
+import { notify } from "../utils/notify";
 import { logger } from "../utils/logger";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -181,12 +182,14 @@ async function refundRegistrationInternal(args: {
       refundId,
     });
     if (user?.push_token) {
-      sendExpoPushNotification(
-        user.push_token,
-        "Refund initiated",
-        "Your event registration has been refunded.",
-        { screen: "Events" },
-      );
+      await notify({
+        pushToken: user.push_token,
+        userId: user.id,
+        title: "Refund initiated",
+        body: "Your event registration has been refunded.",
+        type: "event_refund",
+        data: { screen: "Events" },
+      });
     }
   } catch {/* non-blocking */}
 
@@ -616,7 +619,14 @@ export async function partialCancelTickets(
   try {
     const user = await prisma.user.findUnique({
       where: { id: reg.user_id },
-      select: { id: true, push_token: true },
+      select: { id: true, name: true, push_token: true },
+    });
+    const event = await prisma.event.findUnique({
+      where: { id: reg.event_id },
+      include: {
+        business: { select: { user_id: true } },
+        business_promotion: { select: { user_id: true } },
+      },
     });
     const io = getIO();
     if (io) {
@@ -628,16 +638,51 @@ export async function partialCancelTickets(
         refundId,
         isFullCancel,
       });
+
+      const organizerId =
+        event?.business_promotion?.user_id ?? event?.business?.user_id ?? null;
+      if (organizerId && organizerId !== reg.user_id) {
+        io.to(`user:${organizerId}`).emit("event:tickets_cancelled", {
+          type: "event:tickets_cancelled",
+          eventId: reg.event_id,
+          eventTitle: event?.title,
+          attendeeName: user?.name ?? "Someone",
+          cancelledCount: cancelCount,
+          remainingActiveTickets: activeTickets - cancelCount,
+          isFullCancel,
+        });
+      }
     }
     if (user?.push_token) {
-      sendExpoPushNotification(
-        user.push_token,
-        isFullCancel ? "Tickets cancelled & refunded" : `${cancelCount} ticket(s) cancelled`,
-        isFullCancel
+      await notify({
+        pushToken: user.push_token,
+        userId: reg.user_id,
+        title: isFullCancel ? "Tickets cancelled & refunded" : `${cancelCount} ticket(s) cancelled`,
+        body: isFullCancel
           ? "All your tickets have been cancelled and refunded."
           : `${cancelCount} ticket(s) cancelled. ${activeTickets - cancelCount} ticket(s) remain.`,
-        { screen: "Events" },
-      );
+        type: "event_cancel",
+        data: { screen: "Events" },
+      });
+    }
+
+    const organizerId =
+      event?.business_promotion?.user_id ?? event?.business?.user_id ?? null;
+    if (organizerId && organizerId !== reg.user_id) {
+      const organizer = await prisma.user.findUnique({
+        where: { id: organizerId },
+        select: { push_token: true },
+      });
+      if (organizer?.push_token) {
+        await notify({
+          pushToken: organizer.push_token,
+          userId: organizerId,
+          title: "Tickets cancelled",
+          body: `${user?.name ?? "A user"} cancelled ${cancelCount} ticket(s) for \"${event?.title ?? "your event"}\".`,
+          type: "event_cancel_organizer",
+          data: { screen: "Events", eventId: reg.event_id },
+        });
+      }
     }
   } catch {/* non-blocking */}
 

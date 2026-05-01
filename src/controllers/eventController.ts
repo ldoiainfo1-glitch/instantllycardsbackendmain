@@ -11,6 +11,7 @@ import {
 } from "../services/razorpayService";
 import { getIO } from "../services/socketService";
 import { sendExpoPushNotification } from "../utils/push";
+import { notify } from "../utils/notify";
 import { Prisma } from "@prisma/client";
 import { decorateEvent, decorateEvents } from "../utils/eventDecorator";
 import { logger } from "../utils/logger";
@@ -51,6 +52,54 @@ function calculateTicketAmountPaise(
   ticketCount: number,
 ): number {
   return Math.round(ticketPrice * 100) * ticketCount;
+}
+
+async function notifyRegistrantRegistrationSuccess(args: {
+  userId: number;
+  eventId: number;
+  eventTitle: string;
+  ticketCount: number;
+  paymentStatus: string;
+  tierName?: string;
+}): Promise<void> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: args.userId },
+      select: { push_token: true },
+    });
+    const io = getIO();
+    if (io) {
+      io.to(`user:${args.userId}`).emit("event:registration_confirmed", {
+        type: "event:registration_confirmed",
+        eventId: args.eventId,
+        eventTitle: args.eventTitle,
+        ticketCount: args.ticketCount,
+        paymentStatus: args.paymentStatus,
+        tierName: args.tierName,
+      });
+    }
+    const isPaid = args.paymentStatus === "paid";
+    const title = isPaid
+      ? "Tickets purchased successfully"
+      : "Registration successful";
+    const tierPart = args.tierName ? ` (${args.tierName})` : "";
+    const ticketPart =
+      args.ticketCount > 1
+        ? ` for ${args.ticketCount} tickets${tierPart}`
+        : ` for 1 ticket${tierPart}`;
+    const body = `You have registered for \"${args.eventTitle}\" successfully${ticketPart}.`;
+
+    await notify({
+      pushToken: user?.push_token,
+      userId: args.userId,
+      title,
+      body,
+      type: "event_registration",
+      data: { screen: "MyPasses", eventId: args.eventId },
+    });
+  } catch {
+    /* non-blocking */
+  }
 }
 
 export async function listEvents(req: Request, res: Response): Promise<void> {
@@ -409,6 +458,9 @@ export async function updateEvent(
     }
     console.log("[updateEvent] applying data:", JSON.stringify(data));
 
+    // Capture old max_attendees before updating so we can detect a capacity increase.
+    const oldMaxAttendees = event.max_attendees;
+
     const updated = await prisma.event.update({
       where: { id },
       data,
@@ -416,6 +468,56 @@ export async function updateEvent(
     });
     console.log("[updateEvent] success — event:", updated.id, updated.title);
     res.json(decorateEvent(updated as any));
+
+    // After responding, check if capacity was increased and notify waitlisted users.
+    // Only fire when max_attendees grew AND there is now free capacity.
+    const newMaxAttendees = updated.max_attendees;
+    const capacityIncreased =
+      newMaxAttendees !== null &&
+      (oldMaxAttendees === null || newMaxAttendees > oldMaxAttendees) &&
+      updated.attendee_count < newMaxAttendees;
+
+    if (capacityIncreased) {
+      try {
+        const waitlisted = await prisma.eventWaitlist.findMany({
+          where: { event_id: id, status: "waiting" },
+          select: { user_id: true },
+        });
+
+        if (waitlisted.length > 0) {
+          const userIds = waitlisted.map((w) => w.user_id);
+          const users = await prisma.user.findMany({
+            where: { id: { in: userIds }, push_token: { not: null } },
+            select: { id: true, push_token: true },
+          });
+
+          const io = getIO();
+          for (const u of users) {
+            if (io) {
+              io.to(`user:${u.id}`).emit("event:tickets_available", {
+                type: "event:tickets_available",
+                eventId: id,
+                eventTitle: updated.title,
+              });
+            }
+            await notify({
+              pushToken: u.push_token,
+              userId: u.id,
+              title: "🎟️ Tickets Are Live!",
+              body: `Tickets are available again for "${updated.title}"! You're on the waitlist — register now before they sell out!`,
+              type: "event_tickets_available",
+              data: { screen: "Events", eventId: id },
+            });
+          }
+          console.log(
+            `[updateEvent] notified ${users.length} waitlisted user(s) of new capacity for event ${id}`,
+          );
+        }
+      } catch (notifyErr) {
+        console.error("[updateEvent] waitlist notify ERROR:", notifyErr);
+        /* non-blocking — do not re-throw */
+      }
+    }
   } catch (err) {
     console.error("[updateEvent] ERROR:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -638,6 +740,14 @@ export async function registerForEvent(
     legacy: true,
   });
 
+  await notifyRegistrantRegistrationSuccess({
+    userId: req.user!.userId,
+    eventId,
+    eventTitle: event.title,
+    ticketCount: count,
+    paymentStatus,
+  });
+
   // Notify event organizer in real-time
   try {
     const eventWithBiz = await prisma.event.findUnique({
@@ -663,14 +773,14 @@ export async function registerForEvent(
           ticketCount: count,
         };
         if (io) io.to(`user:${organizer.id}`).emit("event:registered", payload);
-        if (organizer.push_token) {
-          sendExpoPushNotification(
-            organizer.push_token,
-            "New Event Registration",
-            `${attendee?.name ?? "Someone"} registered for "${event.title}"`,
-            { screen: "Events" },
-          );
-        }
+        await notify({
+          pushToken: organizer.push_token,
+          userId: organizer.id,
+          title: "New Event Registration",
+          body: `${attendee?.name ?? "Someone"} registered for "${event.title}"`,
+          type: "event_new_registration",
+          data: { screen: "Events" },
+        });
       }
     }
   } catch {
@@ -1519,6 +1629,15 @@ async function registerForEventWithTier(
     legacy: false,
   });
 
+  await notifyRegistrantRegistrationSuccess({
+    userId,
+    eventId,
+    eventTitle: event.title,
+    ticketCount: count,
+    paymentStatus,
+    tierName: tier.name,
+  });
+
   // Notify organizer (best-effort, non-blocking)
   try {
     const eventWithBiz = await prisma.event.findUnique({
@@ -1545,14 +1664,14 @@ async function registerForEventWithTier(
           tierName: tier.name,
         };
         if (io) io.to(`user:${organizer.id}`).emit("event:registered", payload);
-        if (organizer.push_token) {
-          sendExpoPushNotification(
-            organizer.push_token,
-            "New Event Registration",
-            `${attendee?.name ?? "Someone"} registered (${tier.name}) for "${event.title}"`,
-            { screen: "Events" },
-          );
-        }
+        await notify({
+          pushToken: organizer.push_token,
+          userId: organizer.id,
+          title: "New Event Registration",
+          body: `${attendee?.name ?? "Someone"} registered (${tier.name}) for "${event.title}"`,
+          type: "event_new_registration",
+          data: { screen: "Events" },
+        });
       }
     }
   } catch {
