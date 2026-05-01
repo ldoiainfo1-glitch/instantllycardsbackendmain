@@ -4,6 +4,7 @@ import { AuthRequest } from '../middleware/auth';
 import { paramInt } from '../utils/params';
 import { getIO } from '../services/socketService';
 import { sendExpoPushNotification } from '../utils/push';
+import { notify } from '../utils/notify';
 
 export async function getCardReviews(req: Request, res: Response): Promise<void> {
   const cardId = paramInt(req.params.cardId);
@@ -82,9 +83,14 @@ export async function createReview(req: AuthRequest, res: Response): Promise<voi
         const io = getIO();
         const payload = { type: 'review:created', reviewId: review.id, businessId: parseInt(business_id), rating: parseInt(rating), reviewerName: reviewer?.name ?? 'Someone' };
         if (io) io.to(`user:${owner.id}`).emit('review:created', payload);
-        if (owner.push_token) {
-          sendExpoPushNotification(owner.push_token, 'New Review', `${reviewer?.name ?? 'Someone'} left a ${rating}-star review on ${card.company_name || card.full_name}`, { screen: 'Reviews' });
-        }
+        await notify({
+          pushToken: owner.push_token,
+          userId: owner.id,
+          title: 'New Review',
+          body: `${reviewer?.name ?? 'Someone'} left a ${rating}-star review on ${card.company_name || card.full_name}`,
+          type: 'review_created',
+          data: { screen: 'Reviews' },
+        });
       }
     }
   } catch { /* non-blocking */ }

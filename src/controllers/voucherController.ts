@@ -6,6 +6,7 @@ import { paramInt, queryInt } from '../utils/params';
 import { normalizePhone, phoneVariants } from '../utils/phone';
 import { getIO } from '../services/socketService';
 import { sendExpoPushNotification } from '../utils/push';
+import { notify } from '../utils/notify';
 import { createRazorpayOrder, getRazorpayPublicKey, verifyRazorpaySignature } from '../services/razorpayService';
 
 function parseOptionalInt(value: unknown): number | null {
@@ -231,9 +232,14 @@ export async function claimVoucher(req: AuthRequest, res: Response): Promise<voi
         const io = getIO();
         const payload = { type: 'voucher:claimed', voucherId: id, voucherTitle: voucher.title, claimerName: claimer?.name ?? 'Someone' };
         if (io) io.to(`user:${owner.id}`).emit('voucher:claimed', payload);
-        if (owner.push_token) {
-          sendExpoPushNotification(owner.push_token, 'Voucher Claimed', `${claimer?.name ?? 'Someone'} claimed your voucher "${voucher.title}"`, { screen: 'Vouchers' });
-        }
+        await notify({
+          pushToken: owner.push_token,
+          userId: owner.id,
+          title: 'Voucher Claimed',
+          body: `${claimer?.name ?? 'Someone'} claimed your voucher "${voucher.title}"`,
+          type: 'voucher_claimed',
+          data: { screen: 'Vouchers' },
+        });
       }
     }
   } catch { /* non-blocking */ }
@@ -349,9 +355,14 @@ export async function transferVoucher(req: AuthRequest, res: Response): Promise<
       const io = getIO();
       const payload = { type: 'voucher:transferred', transferId: transfer.id, voucherId: vId, voucherTitle: voucher.title, senderName: sender?.name ?? 'Someone' };
       if (io) io.to(`user:${recipientUser.id}`).emit('voucher:transferred', payload);
-      if (recipientUser.push_token) {
-        sendExpoPushNotification(recipientUser.push_token, 'Voucher Received', `${sender?.name ?? 'Someone'} transferred a voucher "${voucher.title}" to you`, { screen: 'Vouchers' });
-      }
+      await notify({
+        pushToken: recipientUser.push_token,
+        userId: recipientUser.id,
+        title: 'Voucher Received',
+        body: `${sender?.name ?? 'Someone'} transferred a voucher "${voucher.title}" to you`,
+        type: 'voucher_transferred',
+        data: { screen: 'Vouchers' },
+      });
     }
   } catch { /* non-blocking */ }
 
