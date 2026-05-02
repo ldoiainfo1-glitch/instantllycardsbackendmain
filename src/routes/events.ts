@@ -16,6 +16,7 @@ import {
   verifyRegistration,
   createCartPaymentIntent,
   registerCartItems,
+  getFriendAttendees,
 } from '../controllers/eventController';
 import {
   createTicketTier,
@@ -66,6 +67,7 @@ router.get('/', h(listEvents));
 router.get('/my', authenticate, requireRole('business', 'admin'), h(listMyEvents));
 router.get('/registrations/my', authenticate, h(getMyRegistrations));
 router.get('/:id', h(getEvent));
+router.get('/:id/friend-attendees', authenticate, h(getFriendAttendees));
 router.get('/:id/registrations', authenticate, h(getEventRegistrations));
 router.post(
   '/',

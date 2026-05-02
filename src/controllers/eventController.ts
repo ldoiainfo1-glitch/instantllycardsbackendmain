@@ -281,6 +281,197 @@ export async function getEvent(req: Request, res: Response): Promise<void> {
   }
 }
 
+/**
+ * Return app-user contacts (friends) of the requester who are already
+ * registered for the given event (paid or free).
+ */
+export async function getFriendAttendees(
+  req: AuthRequest,
+  res: Response,
+): Promise<void> {
+  const eventId = paramInt(req.params.id);
+  const userId = req.user!.userId;
+
+  try {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      select: { id: true, status: true, cancelled_at: true },
+    });
+
+    if (!event) {
+      res.status(404).json({ error: "Event not found" });
+      return;
+    }
+
+    const contacts = await prisma.contact.findMany({
+      where: {
+        user_id: userId,
+        is_app_user: true,
+        app_user_id: { not: null },
+      },
+      select: {
+        app_user_id: true,
+        name: true,
+      },
+    });
+
+    const contactNameByFriendId = new Map<number, string>();
+    for (const c of contacts) {
+      if (typeof c.app_user_id === "number" && c.app_user_id !== userId) {
+        if (!contactNameByFriendId.has(c.app_user_id)) {
+          contactNameByFriendId.set(c.app_user_id, c.name);
+        }
+      }
+    }
+
+    const friendIds = Array.from(contactNameByFriendId.keys());
+    if (friendIds.length === 0) {
+      res.json({
+        event_id: eventId,
+        total_friends_attending: 0,
+        friends: [],
+      });
+      return;
+    }
+
+    const registrations = await prisma.eventRegistration.findMany({
+      where: {
+        event_id: eventId,
+        user_id: { in: friendIds },
+        cancelled_at: null,
+        OR: [
+          { refund_status: null },
+          { refund_status: { notIn: ["refunded", "cancelled"] } },
+        ],
+      },
+      select: {
+        user_id: true,
+        ticket_count: true,
+        payment_status: true,
+        registered_at: true,
+      },
+    });
+
+    if (registrations.length === 0) {
+      res.json({
+        event_id: eventId,
+        total_friends_attending: 0,
+        friends: [],
+      });
+      return;
+    }
+
+    const aggregate = new Map<
+      number,
+      {
+        user_id: number;
+        tickets: number;
+        registrations: number;
+        has_paid_ticket: boolean;
+        has_free_registration: boolean;
+        last_registered_at: Date;
+      }
+    >();
+
+    for (const reg of registrations) {
+      const current = aggregate.get(reg.user_id);
+      const isPaid = reg.payment_status === "paid";
+      if (!current) {
+        aggregate.set(reg.user_id, {
+          user_id: reg.user_id,
+          tickets: reg.ticket_count,
+          registrations: 1,
+          has_paid_ticket: isPaid,
+          has_free_registration: !isPaid,
+          last_registered_at: reg.registered_at,
+        });
+        continue;
+      }
+
+      current.tickets += reg.ticket_count;
+      current.registrations += 1;
+      current.has_paid_ticket = current.has_paid_ticket || isPaid;
+      current.has_free_registration = current.has_free_registration || !isPaid;
+      if (reg.registered_at > current.last_registered_at) {
+        current.last_registered_at = reg.registered_at;
+      }
+    }
+
+    const attendeeIds = Array.from(aggregate.keys());
+
+    // Rank by how frequently the requester and friend have messaged each other.
+    // This approximates "most-contacted friends first" for suggestion order.
+    const interactionCountByFriendId = new Map<number, number>();
+    if (attendeeIds.length > 0) {
+      const interactionRows = await prisma.message.findMany({
+        where: {
+          OR: [
+            {
+              sender_id: userId,
+              receiver_id: { in: attendeeIds },
+            },
+            {
+              sender_id: { in: attendeeIds },
+              receiver_id: userId,
+            },
+          ],
+        },
+        select: { sender_id: true, receiver_id: true },
+      });
+
+      for (const row of interactionRows) {
+        const friendId =
+          row.sender_id === userId ? row.receiver_id : row.sender_id;
+        if (!friendId || friendId === userId) continue;
+        interactionCountByFriendId.set(
+          friendId,
+          (interactionCountByFriendId.get(friendId) ?? 0) + 1,
+        );
+      }
+    }
+
+    const users = await prisma.user.findMany({
+      where: { id: { in: attendeeIds } },
+      select: { id: true, name: true, phone: true, profile_picture: true },
+    });
+
+    const userById = new Map(users.map((u) => [u.id, u]));
+
+    const friends = attendeeIds
+      .map((id) => {
+        const stats = aggregate.get(id)!;
+        const u = userById.get(id);
+        const contactName = contactNameByFriendId.get(id);
+        return {
+          user_id: id,
+          name: (contactName && contactName.trim()) || u?.name || u?.phone || "Friend",
+          profile_picture: u?.profile_picture ?? null,
+          tickets: stats.tickets,
+          registrations: stats.registrations,
+          has_paid_ticket: stats.has_paid_ticket,
+          has_free_registration: stats.has_free_registration,
+          interaction_count: interactionCountByFriendId.get(id) ?? 0,
+          last_registered_at: stats.last_registered_at,
+        };
+      })
+      .sort(
+        (a, b) =>
+          (b.interaction_count - a.interaction_count) ||
+          (new Date(b.last_registered_at).getTime() -
+            new Date(a.last_registered_at).getTime()),
+      );
+
+    res.json({
+      event_id: eventId,
+      total_friends_attending: friends.length,
+      friends,
+    });
+  } catch (err) {
+    console.error("[getFriendAttendees] ERROR:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
 export async function listMyEvents(
   req: AuthRequest,
   res: Response,
