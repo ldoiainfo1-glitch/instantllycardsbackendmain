@@ -2053,14 +2053,17 @@ export async function registerCartItems(
 
   if (!allFree) {
     if (!payment?.razorpay_order_id || !payment?.razorpay_payment_id || !payment?.razorpay_signature) {
+      console.error("[registerCartItems] missing payment fields — orderId:", payment?.razorpay_order_id, "paymentId:", payment?.razorpay_payment_id, "sig:", !!payment?.razorpay_signature);
       res.status(400).json({ error: "Payment details required for paid tickets" });
       return;
     }
     // Verify Razorpay signature
+    const razorpaySecret = process.env.RAZORPAY_KEY_SECRET_TEST || process.env.RAZORPAY_KEY_SECRET || "";
     const expectedSig = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET || "")
+      .createHmac("sha256", razorpaySecret)
       .update(`${payment.razorpay_order_id}|${payment.razorpay_payment_id}`)
       .digest("hex");
+    console.log("[registerCartItems] sig check — orderId:", payment.razorpay_order_id, "paymentId:", payment.razorpay_payment_id, "match:", expectedSig === payment.razorpay_signature, "keySecretSet:", !!razorpaySecret);
     if (expectedSig !== payment.razorpay_signature) {
       res.status(400).json({ error: "Invalid payment signature" });
       return;
