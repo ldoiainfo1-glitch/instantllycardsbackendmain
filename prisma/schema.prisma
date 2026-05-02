@@ -400,6 +400,12 @@ model Event {
   // Media
   company_logo          String?
   venue_images          String[]
+  // Recurring events
+  recurrence_rule       String?   // JSON: {"freq":"weekly","days":["TUE"],"interval":1}
+  recurrence_ends_at    DateTime?
+  parent_event_id       Int?      // set on occurrence rows; null on parent
+  parent_event          Event?    @relation("EventOccurrences", fields: [parent_event_id], references: [id], onDelete: Cascade)
+  occurrences           Event[]   @relation("EventOccurrences")
   business              BusinessCard?       @relation(fields: [business_id], references: [id], onDelete: SetNull)
   business_promotion    BusinessPromotion?  @relation("BusinessPromotionEvents", fields: [business_promotion_id], references: [id], onDelete: Cascade)
   registrations         EventRegistration[]
@@ -411,6 +417,7 @@ model Event {
   @@index([uploaded_by_admin])
   @@index([city])
   @@index([state])
+  @@index([parent_event_id])
 }
 
 model EventRegistration {
@@ -440,7 +447,8 @@ model EventRegistration {
   user              User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
   ticket_tier       EventTicketTier?  @relation(fields: [ticket_tier_id], references: [id], onDelete: SetNull)
 
-  @@unique([user_id, event_id], name: "EventRegistration_user_event_unique")
+  // Changed from (user_id, event_id) to allow buying multiple tiers for the same event
+  @@unique([user_id, event_id, ticket_tier_id], name: "EventRegistration_user_event_tier_unique")
   @@index([payment_id])
   @@index([payment_order_id])
   @@index([qr_code])
