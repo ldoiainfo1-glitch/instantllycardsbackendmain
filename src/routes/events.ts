@@ -14,6 +14,8 @@ import {
   getEventRegistrations,
   getMyRegistrations,
   verifyRegistration,
+  createCartPaymentIntent,
+  registerCartItems,
 } from '../controllers/eventController';
 import {
   createTicketTier,
@@ -81,6 +83,9 @@ router.post(
 router.put('/:id', authenticate, h(updateEvent));
 router.post('/:id/payment-intent', authenticate, registerRateLimit, h(createEventPaymentIntent));
 router.post('/:id/register', authenticate, registerRateLimit, h(registerForEvent));
+// Multi-tier cart checkout
+router.post('/:id/payment-intent-cart', authenticate, registerRateLimit, h(createCartPaymentIntent));
+router.post('/:id/register-cart', authenticate, registerRateLimit, h(registerCartItems));
 router.post('/verify', authenticate, h(verifyRegistration));
 
 // Phase 3 — Ticket tier CRUD (organizer/admin only for write paths)

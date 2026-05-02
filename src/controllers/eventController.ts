@@ -300,10 +300,13 @@ export async function listMyEvents(
     }
 
     const events = await prisma.event.findMany({
-      where: { business_promotion_id: { in: promotionIds } },
+      where: {
+        business_promotion_id: { in: promotionIds },
+        parent_event_id: null, // only show parent events; occurrences are listed separately
+      },
       orderBy: { date: "desc" },
       include: {
-        _count: { select: { registrations: true } },
+        _count: { select: { registrations: true, occurrences: true } },
         business_promotion: {
           select: { id: true, business_name: true, business_card_id: true },
         },
@@ -316,6 +319,70 @@ export async function listMyEvents(
     console.error("[listMyEvents] ERROR:", err);
     res.status(500).json({ error: "Internal server error" });
   }
+}
+
+// ─── Recurrence helpers ────────────────────────────────────────────────────
+
+const DAY_MAP: Record<string, number> = {
+  SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6,
+};
+
+/**
+ * Generate occurrence dates for a recurring event.
+ * Starts from the day AFTER baseDate, up to endsAt or maxOccurrences (default 52).
+ */
+function generateRecurringDates(
+  baseDate: Date,
+  rule: { freq: "weekly" | "monthly"; days?: string[]; interval?: number },
+  endsAt: Date,
+  maxOccurrences = 52,
+): Date[] {
+  const dates: Date[] = [];
+  const interval = Math.max(1, rule.interval ?? 1);
+
+  if (rule.freq === "weekly") {
+    const targetDays = (rule.days ?? [])
+      .map((d) => DAY_MAP[d.toUpperCase()])
+      .filter((d) => d !== undefined) as number[];
+    if (targetDays.length === 0) return dates;
+
+    // Walk day by day starting from the day after the base event
+    const current = new Date(baseDate);
+    current.setDate(current.getDate() + 1);
+    // track week start to apply interval correctly
+    let weeksSinceBase = 0;
+    let lastWeek = -1;
+
+    while (current <= endsAt && dates.length < maxOccurrences) {
+      const dow = current.getDay();
+      // Which week number is this relative to base?
+      const daysDiff = Math.floor((current.getTime() - baseDate.getTime()) / (86400000));
+      const currentWeek = Math.floor(daysDiff / 7);
+
+      if (currentWeek !== lastWeek) {
+        weeksSinceBase = currentWeek;
+        lastWeek = currentWeek;
+      }
+
+      // Only include days that fall on an interval week
+      if (weeksSinceBase % interval === 0 && targetDays.includes(dow)) {
+        dates.push(new Date(current));
+      }
+      current.setDate(current.getDate() + 1);
+    }
+  } else if (rule.freq === "monthly") {
+    const dayOfMonth = baseDate.getDate();
+    const current = new Date(baseDate.getFullYear(), baseDate.getMonth() + interval, dayOfMonth);
+
+    while (current <= endsAt && dates.length < maxOccurrences) {
+      dates.push(new Date(current));
+      current.setMonth(current.getMonth() + interval);
+      // Correct for month overflow (e.g., Jan 31 + 1 month → Mar 3)
+      current.setDate(dayOfMonth);
+    }
+  }
+
+  return dates;
 }
 
 export async function createEvent(
@@ -336,6 +403,8 @@ export async function createEvent(
     max_attendees,
     company_logo,
     venue_images,
+    recurrence_rule,
+    recurrence_ends_at,
   } = req.body;
 
   console.log("[createEvent] body:", JSON.stringify(req.body));
@@ -406,6 +475,32 @@ export async function createEvent(
   }
 
   try {
+    // Parse and validate recurrence_rule if provided
+    let parsedRule: { freq: "weekly" | "monthly"; days?: string[]; interval?: number } | null = null;
+    let recurrenceEndsAt: Date | null = null;
+
+    if (recurrence_rule) {
+      try {
+        parsedRule = typeof recurrence_rule === "string" ? JSON.parse(recurrence_rule) : recurrence_rule;
+        if (!parsedRule || !["weekly", "monthly"].includes(parsedRule.freq)) {
+          res.status(400).json({ error: "Invalid recurrence_rule: freq must be 'weekly' or 'monthly'" });
+          return;
+        }
+      } catch {
+        res.status(400).json({ error: "Invalid recurrence_rule: must be valid JSON" });
+        return;
+      }
+      if (!recurrence_ends_at) {
+        res.status(400).json({ error: "recurrence_ends_at is required when recurrence_rule is set" });
+        return;
+      }
+      recurrenceEndsAt = new Date(recurrence_ends_at);
+      if (isNaN(recurrenceEndsAt.getTime())) {
+        res.status(400).json({ error: "Invalid recurrence_ends_at date" });
+        return;
+      }
+    }
+
     const event = await prisma.event.create({
       data: {
         business_promotion_id: promotion.id,
@@ -422,6 +517,8 @@ export async function createEvent(
         status: "active",
         company_logo: company_logo || null,
         venue_images: Array.isArray(venue_images) ? venue_images : [],
+        recurrence_rule: parsedRule ? JSON.stringify(parsedRule) : null,
+        recurrence_ends_at: recurrenceEndsAt,
       },
       include: {
         business_promotion: {
@@ -432,7 +529,39 @@ export async function createEvent(
       },
     });
     console.log("[createEvent] success — event.id:", event.id);
-    res.status(201).json(decorateEvent(event as any));
+
+    // Generate occurrence events if recurrence is set
+    let occurrencesCreated = 0;
+    if (parsedRule && recurrenceEndsAt) {
+      const baseDate = new Date(date);
+      const occurrenceDates = generateRecurringDates(baseDate, parsedRule, recurrenceEndsAt);
+      console.log(`[createEvent] generating ${occurrenceDates.length} occurrences for parent event.id:`, event.id);
+
+      for (const occDate of occurrenceDates) {
+        await prisma.event.create({
+          data: {
+            business_promotion_id: promotion.id,
+            business_id: promotion.business_card_id ?? null,
+            title,
+            description: description || null,
+            date: occDate,
+            time,
+            location: location || null,
+            image_url: image_url || null,
+            ticket_price: ticket_price ? parseFloat(ticket_price) : null,
+            max_attendees: max_attendees ? parseInt(max_attendees, 10) : null,
+            status: "active",
+            company_logo: company_logo || null,
+            venue_images: Array.isArray(venue_images) ? venue_images : [],
+            parent_event_id: event.id,
+          },
+        });
+        occurrencesCreated++;
+      }
+      console.log(`[createEvent] created ${occurrencesCreated} occurrence events`);
+    }
+
+    res.status(201).json({ ...decorateEvent(event as any), occurrences_created: occurrencesCreated });
   } catch (err) {
     console.error("[createEvent] prisma error:", err);
     const detail = (err as any)?.message ?? String(err);
@@ -1764,3 +1893,240 @@ async function registerForEventWithTier(
   // can use a single transformResponse for both flows.
   res.status(201).json({ ...registration, qr_code: qrCode });
 }
+
+// ════════════════════════════════════════════════════════════════════════
+// Multi-tier cart checkout
+// ════════════════════════════════════════════════════════════════════════
+
+/**
+ * Create a single Razorpay order for a cart containing items from multiple
+ * ticket tiers (e.g. 4 VIP + 2 General). Amount = sum of tier.price * qty
+ * for all items.
+ *
+ * Body: { items: Array<{ tier_id: number; ticket_count: number }> }
+ */
+export async function createCartPaymentIntent(
+  req: AuthRequest,
+  res: Response,
+): Promise<void> {
+  const eventId = paramInt(req.params.id);
+  const { items } = req.body;
+
+  if (!Array.isArray(items) || items.length === 0) {
+    res.status(400).json({ error: "items must be a non-empty array" });
+    return;
+  }
+
+  const tierIds: number[] = [];
+  for (const item of items) {
+    const tierId = Number(item.tier_id);
+    const count = parseStrictTicketCount(item.ticket_count);
+    if (!tierId || !count) {
+      res.status(400).json({ error: "Each item needs a valid tier_id and ticket_count" });
+      return;
+    }
+    tierIds.push(tierId);
+  }
+
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    include: { ticket_tiers: { where: { id: { in: tierIds } } } },
+  });
+  if (!event) { res.status(404).json({ error: "Event not found" }); return; }
+  if (event.status !== "active" || event.cancelled_at) {
+    res.status(400).json({ error: "Event is not active" }); return;
+  }
+
+  let totalPaise = 0;
+  const orderItems: Array<{ tier_id: number; tier_name: string; ticket_count: number; unit_price: number }> = [];
+
+  for (const item of items) {
+    const tierId = Number(item.tier_id);
+    const count = parseStrictTicketCount(item.ticket_count)!;
+    const tier = event.ticket_tiers.find((t) => t.id === tierId);
+    if (!tier) { res.status(404).json({ error: `Tier ${tierId} not found` }); return; }
+    if (!tier.is_active) { res.status(400).json({ error: `Tier "${tier.name}" is not active` }); return; }
+    const unitPrice = Number(tier.price ?? 0) || 0;
+    totalPaise += Math.round(unitPrice * 100) * count;
+    orderItems.push({ tier_id: tierId, tier_name: tier.name, ticket_count: count, unit_price: unitPrice });
+  }
+
+  if (totalPaise === 0) {
+    res.status(400).json({ error: "All selected tiers are free — no payment required", code: "FREE_CART" });
+    return;
+  }
+
+  const receipt = `evt_${eventId}_cart_u${req.user!.userId}_${Date.now()}`.slice(0, 40);
+  try {
+    const order = await createRazorpayOrder({
+      amountPaise: totalPaise,
+      currency: "INR",
+      receipt,
+      notes: {
+        event_id: String(eventId),
+        user_id: String(req.user!.userId),
+        cart: JSON.stringify(items),
+      },
+    });
+    res.status(201).json({
+      key_id: getRazorpayPublicKey(),
+      order_id: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      event_id: eventId,
+      event_title: event.title,
+      items: orderItems,
+    });
+  } catch (err) {
+    console.error("[createCartPaymentIntent] ERROR:", err);
+    res.status(502).json({ error: "Unable to create payment order" });
+  }
+}
+
+/**
+ * Register for multiple ticket tiers of the same event in one atomic
+ * transaction. Creates one EventRegistration row per cart item.
+ *
+ * Body: {
+ *   items: Array<{ tier_id: number; ticket_count: number }>,
+ *   payment?: { razorpay_order_id, razorpay_payment_id, razorpay_signature }
+ * }
+ */
+export async function registerCartItems(
+  req: AuthRequest,
+  res: Response,
+): Promise<void> {
+  const eventId = paramInt(req.params.id);
+  const { items, payment } = req.body;
+
+  if (!Array.isArray(items) || items.length === 0) {
+    res.status(400).json({ error: "items must be a non-empty array" });
+    return;
+  }
+
+  const userId = req.user!.userId;
+  const tierIds: number[] = items.map((i: any) => Number(i.tier_id));
+
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    include: { ticket_tiers: { where: { id: { in: tierIds } } } },
+  });
+  if (!event) { res.status(404).json({ error: "Event not found" }); return; }
+  if (event.status !== "active" || event.cancelled_at) {
+    res.status(400).json({ error: "Event is not active" }); return;
+  }
+
+  // Validate items + build work list
+  let totalAmount = 0;
+  let allFree = true;
+  const workItems: Array<{ tier: any; count: number; unitPrice: number }> = [];
+
+  for (const item of items) {
+    const tierId = Number(item.tier_id);
+    const count = parseStrictTicketCount(item.ticket_count);
+    if (!count) { res.status(400).json({ error: `Invalid ticket_count for tier ${tierId}` }); return; }
+    const tier = event.ticket_tiers.find((t) => t.id === tierId);
+    if (!tier) { res.status(404).json({ error: `Tier ${tierId} not found` }); return; }
+    if (!tier.is_active) { res.status(400).json({ error: `Tier "${tier.name}" is not active` }); return; }
+
+    // Check not already registered for this specific tier
+    const existing = await prisma.eventRegistration.findFirst({
+      where: { event_id: eventId, user_id: userId, ticket_tier_id: tierId },
+      select: { id: true },
+    });
+    if (existing) {
+      res.status(409).json({ error: `Already registered for "${tier.name}"`, code: "ALREADY_REGISTERED" });
+      return;
+    }
+
+    const unitPrice = Number(tier.price ?? 0) || 0;
+    if (unitPrice > 0) allFree = false;
+    totalAmount += unitPrice * count;
+    workItems.push({ tier, count, unitPrice });
+  }
+
+  // Payment validation for paid cart
+  let paymentStatus = "not_required";
+  let paymentOrderId: string | null = null;
+  let paymentId: string | null = null;
+  let paymentSignature: string | null = null;
+
+  if (!allFree) {
+    if (!payment?.razorpay_order_id || !payment?.razorpay_payment_id || !payment?.razorpay_signature) {
+      res.status(400).json({ error: "Payment details required for paid tickets" });
+      return;
+    }
+    // Verify Razorpay signature
+    const expectedSig = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET || "")
+      .update(`${payment.razorpay_order_id}|${payment.razorpay_payment_id}`)
+      .digest("hex");
+    if (expectedSig !== payment.razorpay_signature) {
+      res.status(400).json({ error: "Invalid payment signature" });
+      return;
+    }
+    paymentStatus = "paid";
+    paymentOrderId = payment.razorpay_order_id;
+    paymentId = payment.razorpay_payment_id;
+    paymentSignature = payment.razorpay_signature;
+  }
+
+  // Create all registrations atomically
+  try {
+    const createdRegistrations = await prisma.$transaction(async (tx) => {
+      const results = [];
+      for (const { tier, count, unitPrice } of workItems) {
+        const qrCode = `EVT-${eventId}-${crypto.randomBytes(6).toString("hex")}`;
+
+        // Atomic capacity increment (only if tier has a cap)
+        if (tier.quantity_total !== null) {
+          const affected: number = await tx.$executeRaw(
+            Prisma.sql`UPDATE "EventTicketTier"
+                       SET "quantity_sold" = "quantity_sold" + ${count},
+                           "updated_at"    = NOW()
+                       WHERE "id" = ${tier.id}
+                         AND "is_active" = true
+                         AND "quantity_sold" + ${count} <= "quantity_total"`,
+          );
+          if (affected === 0) {
+            throw Object.assign(new Error(`"${tier.name}" is sold out`), { http: 409, code: "TIER_FULL" });
+          }
+        } else {
+          await tx.$executeRaw(
+            Prisma.sql`UPDATE "EventTicketTier"
+                       SET "quantity_sold" = "quantity_sold" + ${count}, "updated_at" = NOW()
+                       WHERE "id" = ${tier.id}`,
+          );
+        }
+
+        const reg = await tx.eventRegistration.create({
+          data: {
+            event_id: eventId,
+            user_id: userId,
+            ticket_tier_id: tier.id,
+            ticket_count: count,
+            qr_code: qrCode,
+            payment_status: paymentStatus,
+            payment_order_id: paymentOrderId,
+            payment_id: paymentId,
+            payment_signature: paymentSignature,
+            amount_paid: allFree ? null : unitPrice * count,
+          },
+          include: { ticket_tier: true },
+        });
+        results.push({ ...reg, qr_code: qrCode });
+      }
+      return results;
+    });
+
+    res.status(201).json({ registrations: createdRegistrations });
+  } catch (err: any) {
+    if (err.http === 409) {
+      res.status(409).json({ error: err.message, code: err.code });
+      return;
+    }
+    console.error("[registerCartItems] ERROR:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
