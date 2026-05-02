@@ -43,7 +43,7 @@ export async function getEventAnalytics(
   // Conversion is computed against VALID registrations only —
   // refunded and cancelled rows are excluded (matches `registrations`
   // count above), so the rate is meaningful even after refunds.
-  const [registrations, checkIns] = await Promise.all([
+  const [registrations, checkIns, grossAgg, refundAgg] = await Promise.all([
     prisma.eventRegistration.count({
       where: {
         event_id: id,
@@ -59,11 +59,30 @@ export async function getEventAnalytics(
         OR: [{ refund_status: null }, { refund_status: "failed" }],
       },
     }),
+    // Gross revenue: total ever collected — includes refunded registrations.
+    // (Gross - Refunded = Net revenue)
+    prisma.eventRegistration.aggregate({
+      _sum: { amount_paid: true },
+      where: {
+        event_id: id,
+        payment_status: { in: ["paid", "refunded"] },
+      },
+    }),
+    // Refund amount: sum of refund_amount for successfully refunded regs
+    prisma.eventRegistration.aggregate({
+      _sum: { refund_amount: true },
+      where: {
+        event_id: id,
+        refund_status: "refunded",
+      },
+    }),
   ]);
 
   const views = event.views_count ?? 0;
   const conversionRate =
     registrations > 0 ? Number((checkIns / registrations).toFixed(4)) : 0;
+  const grossRevenue = grossAgg._sum.amount_paid ?? 0;
+  const refundAmount = refundAgg._sum.refund_amount ?? 0;
 
   res.json({
     event_id: id,
@@ -71,5 +90,7 @@ export async function getEventAnalytics(
     registrations,
     check_ins: checkIns,
     conversion_rate: conversionRate,
+    gross_revenue: grossRevenue,
+    refund_amount: refundAmount,
   });
 }
