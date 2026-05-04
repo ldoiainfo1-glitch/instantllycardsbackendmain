@@ -411,6 +411,10 @@ model Event {
   registrations         EventRegistration[]
   ticket_tiers          EventTicketTier[]
   waitlist              EventWaitlist[]
+  // Multi-day agenda
+  agenda_days           EventDay[]
+  agenda_sessions       EventSession[]
+  speakers              EventSpeaker[]
 
   @@index([business_promotion_id])
   @@index([business_promotion_id, status])
@@ -418,6 +422,79 @@ model Event {
   @@index([city])
   @@index([state])
   @@index([parent_event_id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Multi-day event structure: days, sessions, speakers, and the many-to-many
+// relation between sessions and speakers (e.g. an "AI Panel" with 3 panelists).
+//
+// All optional / additive — single-day events stay untouched.
+// ─────────────────────────────────────────────────────────────────────────────
+model EventDay {
+  id          Int            @id @default(autoincrement())
+  event_id    Int
+  day_number  Int            // 1, 2, 3 …
+  date        DateTime       // calendar date for this day
+  title       String?        // optional theme e.g. "Workshops Day"
+  created_at  DateTime       @default(now())
+  updated_at  DateTime       @updatedAt
+  event       Event          @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  sessions    EventSession[]
+
+  @@unique([event_id, day_number])
+  @@index([event_id])
+}
+
+model EventSession {
+  id           Int                    @id @default(autoincrement())
+  event_id     Int
+  day_id       Int
+  title        String
+  description  String?
+  start_time   DateTime               // absolute timestamp (date + time)
+  end_time     DateTime
+  session_type String                 @default("session") // keynote|panel|workshop|break|networking|session
+  location     String?                // optional track / room name
+  sort_order   Int                    @default(0)
+  created_at   DateTime               @default(now())
+  updated_at   DateTime               @updatedAt
+  event        Event                  @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  day          EventDay               @relation(fields: [day_id], references: [id], onDelete: Cascade)
+  speakers     EventSessionSpeaker[]
+
+  @@index([event_id])
+  @@index([day_id, sort_order])
+}
+
+model EventSpeaker {
+  id           Int                    @id @default(autoincrement())
+  event_id     Int
+  name         String
+  title        String?                // job title e.g. "Head of AI"
+  company      String?
+  bio          String?
+  photo_url    String?
+  linkedin_url String?
+  twitter_url  String?
+  website_url  String?
+  sort_order   Int                    @default(0)
+  created_at   DateTime               @default(now())
+  updated_at   DateTime               @updatedAt
+  event        Event                  @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  sessions     EventSessionSpeaker[]
+
+  @@index([event_id])
+}
+
+model EventSessionSpeaker {
+  session_id Int
+  speaker_id Int
+  role       String       @default("speaker") // speaker | moderator | host
+  session    EventSession @relation(fields: [session_id], references: [id], onDelete: Cascade)
+  speaker    EventSpeaker @relation(fields: [speaker_id], references: [id], onDelete: Cascade)
+
+  @@id([session_id, speaker_id])
+  @@index([speaker_id])
 }
 
 model EventRegistration {

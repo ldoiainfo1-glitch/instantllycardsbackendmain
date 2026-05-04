@@ -34,6 +34,21 @@ import {
   partialCancelTickets,
 } from '../controllers/eventRefundController';
 import { getEventAnalytics } from '../controllers/eventAnalyticsController';
+import {
+  getEventAgenda,
+  createEventDay,
+  updateEventDay,
+  deleteEventDay,
+  createEventSession,
+  updateEventSession,
+  deleteEventSession,
+  reorderEventSessions,
+  createEventSpeaker,
+  updateEventSpeaker,
+  deleteEventSpeaker,
+  assignSessionSpeaker,
+  unassignSessionSpeaker,
+} from '../controllers/eventAgendaController';
 
 const router = Router();
 const h = (fn: Function) => fn as RequestHandler;
@@ -145,5 +160,20 @@ router.get(
   requireRole('business', 'admin'),
   h(getEventAnalytics),
 );
+
+// Multi-day agenda — public read, organizer/admin write
+router.get('/:id/agenda', h(getEventAgenda));
+router.post('/:id/days', authenticate, requireRole('business', 'admin'), h(createEventDay));
+router.patch('/:id/days/:dayId', authenticate, requireRole('business', 'admin'), h(updateEventDay));
+router.delete('/:id/days/:dayId', authenticate, requireRole('business', 'admin'), h(deleteEventDay));
+router.post('/:id/sessions', authenticate, requireRole('business', 'admin'), h(createEventSession));
+router.patch('/:id/sessions/:sessionId', authenticate, requireRole('business', 'admin'), h(updateEventSession));
+router.delete('/:id/sessions/:sessionId', authenticate, requireRole('business', 'admin'), h(deleteEventSession));
+router.post('/:id/sessions/reorder', authenticate, requireRole('business', 'admin'), h(reorderEventSessions));
+router.post('/:id/speakers', authenticate, requireRole('business', 'admin'), h(createEventSpeaker));
+router.patch('/:id/speakers/:speakerId', authenticate, requireRole('business', 'admin'), h(updateEventSpeaker));
+router.delete('/:id/speakers/:speakerId', authenticate, requireRole('business', 'admin'), h(deleteEventSpeaker));
+router.post('/:id/sessions/:sessionId/speakers', authenticate, requireRole('business', 'admin'), h(assignSessionSpeaker));
+router.delete('/:id/sessions/:sessionId/speakers/:speakerId', authenticate, requireRole('business', 'admin'), h(unassignSessionSpeaker));
 
 export default router;
