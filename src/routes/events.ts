@@ -49,6 +49,11 @@ import {
   assignSessionSpeaker,
   unassignSessionSpeaker,
 } from '../controllers/eventAgendaController';
+import {
+  listEventStaff,
+  addEventStaff,
+  removeEventStaff,
+} from '../controllers/eventStaffController';
 
 const router = Router();
 const h = (fn: Function) => fn as RequestHandler;
@@ -79,7 +84,7 @@ const registerRateLimit =
       });
 
 router.get('/', h(listEvents));
-router.get('/my', authenticate, requireRole('business', 'admin'), h(listMyEvents));
+router.get('/my', authenticate, h(listMyEvents)); // role-gating moved into controller (handles owner + staff)
 router.get('/registrations/my', authenticate, h(getMyRegistrations));
 router.get('/:id', h(getEvent));
 router.get('/:id/friend-attendees', authenticate, h(getFriendAttendees));
@@ -161,19 +166,26 @@ router.get(
   h(getEventAnalytics),
 );
 
-// Multi-day agenda — public read, organizer/admin write
+// Multi-day agenda — public read, owner/co_organizer/admin write
+// Note: requireRole only checks JWT role (business/admin). Co-organizer access
+// is checked inside each controller using canAccessEvent().
 router.get('/:id/agenda', h(getEventAgenda));
-router.post('/:id/days', authenticate, requireRole('business', 'admin'), h(createEventDay));
-router.patch('/:id/days/:dayId', authenticate, requireRole('business', 'admin'), h(updateEventDay));
-router.delete('/:id/days/:dayId', authenticate, requireRole('business', 'admin'), h(deleteEventDay));
-router.post('/:id/sessions', authenticate, requireRole('business', 'admin'), h(createEventSession));
-router.patch('/:id/sessions/:sessionId', authenticate, requireRole('business', 'admin'), h(updateEventSession));
-router.delete('/:id/sessions/:sessionId', authenticate, requireRole('business', 'admin'), h(deleteEventSession));
-router.post('/:id/sessions/reorder', authenticate, requireRole('business', 'admin'), h(reorderEventSessions));
-router.post('/:id/speakers', authenticate, requireRole('business', 'admin'), h(createEventSpeaker));
-router.patch('/:id/speakers/:speakerId', authenticate, requireRole('business', 'admin'), h(updateEventSpeaker));
-router.delete('/:id/speakers/:speakerId', authenticate, requireRole('business', 'admin'), h(deleteEventSpeaker));
-router.post('/:id/sessions/:sessionId/speakers', authenticate, requireRole('business', 'admin'), h(assignSessionSpeaker));
-router.delete('/:id/sessions/:sessionId/speakers/:speakerId', authenticate, requireRole('business', 'admin'), h(unassignSessionSpeaker));
+router.post('/:id/days', authenticate, h(createEventDay));
+router.patch('/:id/days/:dayId', authenticate, h(updateEventDay));
+router.delete('/:id/days/:dayId', authenticate, h(deleteEventDay));
+router.post('/:id/sessions', authenticate, h(createEventSession));
+router.patch('/:id/sessions/:sessionId', authenticate, h(updateEventSession));
+router.delete('/:id/sessions/:sessionId', authenticate, h(deleteEventSession));
+router.post('/:id/sessions/reorder', authenticate, h(reorderEventSessions));
+router.post('/:id/speakers', authenticate, h(createEventSpeaker));
+router.patch('/:id/speakers/:speakerId', authenticate, h(updateEventSpeaker));
+router.delete('/:id/speakers/:speakerId', authenticate, h(deleteEventSpeaker));
+router.post('/:id/sessions/:sessionId/speakers', authenticate, h(assignSessionSpeaker));
+router.delete('/:id/sessions/:sessionId/speakers/:speakerId', authenticate, h(unassignSessionSpeaker));
+
+// Staff management — owner only for write, owner/co_organizer for read
+router.get('/:id/staff', authenticate, h(listEventStaff));
+router.post('/:id/staff', authenticate, h(addEventStaff));
+router.delete('/:id/staff/:staffId', authenticate, h(removeEventStaff));
 
 export default router;

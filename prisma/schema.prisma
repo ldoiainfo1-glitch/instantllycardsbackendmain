@@ -101,6 +101,8 @@ model User {
   voucher_transfer_logs_from VoucherTransferLog[]   @relation("VoucherTransferLogFrom")
   voucher_transfer_logs_to   VoucherTransferLog[]   @relation("VoucherTransferLogTo")
   ad_campaigns               AdCampaign[]           @relation("UserAdCampaigns")
+  event_staff_roles          EventStaff[]           @relation("EventStaffUser")
+  event_staff_invites_sent   EventStaff[]           @relation("EventStaffInviter")
 }
 
 model Profile {
@@ -415,6 +417,7 @@ model Event {
   agenda_days           EventDay[]
   agenda_sessions       EventSession[]
   speakers              EventSpeaker[]
+  staff                 EventStaff[]
 
   @@index([business_promotion_id])
   @@index([business_promotion_id, status])
@@ -422,6 +425,27 @@ model Event {
   @@index([city])
   @@index([state])
   @@index([parent_event_id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Event staff: co-organizers (full edit, no delete) and scanners (scan-only).
+// invited_by is the event owner's user_id.
+// ─────────────────────────────────────────────────────────────────────────────
+model EventStaff {
+  id          Int      @id @default(autoincrement())
+  event_id    Int
+  user_id     Int
+  role        String   // "co_organizer" | "scanner"
+  invited_by  Int
+  created_at  DateTime @default(now())
+
+  event       Event    @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user        User     @relation("EventStaffUser", fields: [user_id], references: [id], onDelete: Cascade)
+  inviter     User     @relation("EventStaffInviter", fields: [invited_by], references: [id], onDelete: Cascade)
+
+  @@unique([event_id, user_id])
+  @@index([user_id])
+  @@index([event_id])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
