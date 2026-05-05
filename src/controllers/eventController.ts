@@ -15,6 +15,7 @@ import { notify } from "../utils/notify";
 import { Prisma } from "@prisma/client";
 import { decorateEvent, decorateEvents } from "../utils/eventDecorator";
 import { logger } from "../utils/logger";
+import { canAccessEvent } from "./eventStaffController";
 
 function parseTicketCount(input: unknown): number {
   const count =
@@ -476,36 +477,70 @@ export async function listMyEvents(
   req: AuthRequest,
   res: Response,
 ): Promise<void> {
-  console.log("[listMyEvents] userId:", req.user!.userId);
+  const userId = req.user!.userId;
+  console.log("[listMyEvents] userId:", userId);
   try {
     const promotions = await prisma.businessPromotion.findMany({
-      where: { user_id: req.user!.userId },
+      where: { user_id: userId },
       select: { id: true },
     });
     const promotionIds = promotions.map((p) => p.id);
-    console.log("[listMyEvents] businessPromotionIds:", promotionIds);
 
-    if (promotionIds.length === 0) {
+    // Also include events where user is a staff member
+    const staffRows = await prisma.eventStaff.findMany({
+      where: { user_id: userId },
+      select: { event_id: true, role: true },
+    });
+    const staffEventIds = staffRows.map((s) => s.event_id);
+    const staffRoleMap = new Map(staffRows.map((s) => [s.event_id, s.role]));
+
+    const hasOwned = promotionIds.length > 0;
+    const hasStaff = staffEventIds.length > 0;
+
+    if (!hasOwned && !hasStaff) {
       res.json([]);
       return;
     }
 
+    const whereClause: any = { parent_event_id: null };
+    if (hasOwned && hasStaff) {
+      whereClause.OR = [
+        { business_promotion_id: { in: promotionIds } },
+        { id: { in: staffEventIds } },
+      ];
+    } else if (hasOwned) {
+      whereClause.business_promotion_id = { in: promotionIds };
+    } else {
+      whereClause.id = { in: staffEventIds };
+    }
+
     const events = await prisma.event.findMany({
-      where: {
-        business_promotion_id: { in: promotionIds },
-        parent_event_id: null, // only show parent events; occurrences are listed separately
-      },
+      where: whereClause,
       orderBy: { date: "desc" },
       include: {
         _count: { select: { registrations: true, occurrences: true } },
         business_promotion: {
-          select: { id: true, business_name: true, business_card_id: true },
+          select: { id: true, business_name: true, business_card_id: true, user_id: true },
         },
         ticket_tiers: { orderBy: { sort_order: "asc" } },
       },
     });
+
     console.log("[listMyEvents] returned", events.length, "events");
-    res.json(decorateEvents(events as any[]));
+
+    // Decorate and tag each event with the viewer's role
+    const decorated = decorateEvents(events as any[]).map((ev: any) => {
+      const ownerUserId =
+        ev.business_promotion?.user_id ?? null;
+      const isOwner = ownerUserId === userId;
+      const staffRole = staffRoleMap.get(ev.id) ?? null;
+      return {
+        ...ev,
+        viewer_role: isOwner ? "owner" : (staffRole ?? "viewer"),
+      };
+    });
+
+    res.json(decorated);
   } catch (err) {
     console.error("[listMyEvents] ERROR:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -788,10 +823,13 @@ export async function updateEvent(
     }
     const ownerUserId =
       event.business_promotion?.user_id ?? event.business?.user_id ?? null;
-    if (
-      ownerUserId !== req.user!.userId &&
-      !req.user!.roles.includes("admin")
-    ) {
+    const isOwner = ownerUserId === req.user!.userId;
+    const isAdmin = req.user!.roles.includes("admin");
+    const isCoOrganizer =
+      !isOwner && !isAdmin
+        ? await canAccessEvent(id, req.user!.userId, ["co_organizer"])
+        : false;
+    if (!isOwner && !isAdmin && !isCoOrganizer) {
       console.log(
         "[updateEvent] forbidden — owner:",
         ownerUserId,
@@ -1410,7 +1448,7 @@ export async function verifyRegistration(
       registration.user?.name,
     );
 
-    // Only allow event owner or admin to verify
+    // Allow event owner, admin, co-organizer, or scanner to verify
     const event = await prisma.event.findUnique({
       where: { id: registration.event_id },
       include: {
@@ -1420,22 +1458,21 @@ export async function verifyRegistration(
     });
     const ownerUserId =
       event?.business_promotion?.user_id ?? event?.business?.user_id ?? null;
-    if (
-      event &&
-      ownerUserId !== req.user!.userId &&
-      !req.user!.roles.includes("admin")
-    ) {
+    const isOwnerOrAdmin =
+      ownerUserId === req.user!.userId || req.user!.roles.includes("admin");
+    const isStaff = event
+      ? await canAccessEvent(registration.event_id, req.user!.userId, ["co_organizer", "scanner"])
+      : false;
+    if (event && !isOwnerOrAdmin && !isStaff) {
       console.log(
         "[verifyRegistration] forbidden — owner:",
         ownerUserId,
         "requester:",
         req.user!.userId,
       );
-      res
-        .status(403)
-        .json({
-          error: "Only the event organizer or admin can verify registrations",
-        });
+      res.status(403).json({
+        error: "Only the event organizer, staff, or admin can verify registrations",
+      });
       return;
     }
 

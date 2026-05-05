@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import prisma from "../utils/prisma";
 import { AuthRequest } from "../middleware/auth";
 import { paramInt } from "../utils/params";
+import { canAccessEvent } from "./eventStaffController";
 
 /**
  * Multi-day agenda controller.
@@ -59,11 +60,15 @@ async function authorizeOrganizer(
     res.status(404).json({ error: "Event not found" });
     return false;
   }
-  if (!isOwnerOrAdmin(event, req)) {
-    res.status(403).json({ error: "Forbidden" });
-    return false;
+  // Allow: owner, admin, or co_organizer staff
+  if (
+    isOwnerOrAdmin(event, req) ||
+    (await canAccessEvent(eventId, req.user!.userId, ["co_organizer"]))
+  ) {
+    return true;
   }
-  return true;
+  res.status(403).json({ error: "Forbidden" });
+  return false;
 }
 
 function parseDate(input: unknown): Date | null {
