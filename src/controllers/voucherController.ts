@@ -138,10 +138,8 @@ export async function createVoucher(req: AuthRequest, res: Response): Promise<vo
     return;
   }
 
-  if (promo.payment_status !== 'completed') {
-    res.status(409).json({ error: 'Promotion payment must be completed to create vouchers' });
-    return;
-  }
+  // Vouchers are available on every active promotion (free or paid).
+  // Tier/payment gating intentionally removed so any business can offer vouchers.
 
   const discountValue = parseFloat(discount_value);
   if (Number.isNaN(discountValue)) {
