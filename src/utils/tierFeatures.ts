@@ -19,8 +19,8 @@ export type Feature =
   | 'max_visibility';
 
 export const TIER_FEATURES: Record<Tier, Feature[]> = {
-  free: ['basic_listing'],
-  growth: ['basic_listing', 'analytics', 'basic_ads'],
+  free: ['basic_listing', 'voucher'],
+  growth: ['basic_listing', 'analytics', 'basic_ads', 'voucher'],
   boost: ['basic_listing', 'analytics', 'basic_ads', 'ads', 'voucher', 'priority_listing'],
   scale: ['basic_listing', 'analytics', 'basic_ads', 'ads', 'voucher', 'priority_listing', 'max_visibility'],
 };
