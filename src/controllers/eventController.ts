@@ -2361,6 +2361,40 @@ export async function registerCartItems(
   }
 }
 
+// DELETE /events/:id — owner or admin only
+export async function deleteEvent(
+  req: AuthRequest,
+  res: Response,
+): Promise<void> {
+  const id = paramInt(req.params.id);
+  console.log("[deleteEvent] id:", id, "userId:", req.user!.userId);
+  try {
+    const event = await prisma.event.findUnique({
+      where: { id },
+      include: {
+        business_promotion: { select: { user_id: true } },
+      },
+    });
+    if (!event) {
+      res.status(404).json({ error: "Event not found" });
+      return;
+    }
+    const ownerUserId = event.business_promotion?.user_id ?? null;
+    const isOwner = ownerUserId === req.user!.userId;
+    const isAdmin = req.user!.roles.includes("admin");
+    if (!isOwner && !isAdmin) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    await prisma.event.delete({ where: { id } });
+    console.log("[deleteEvent] success — event.id:", id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[deleteEvent] ERROR:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Offline Check-in — download attendee list + bulk sync
 // ════════════════════════════════════════════════════════════════════════
