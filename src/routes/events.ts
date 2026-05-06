@@ -9,6 +9,7 @@ import {
   listMyEvents,
   createEvent,
   updateEvent,
+  deleteEvent,
   createEventPaymentIntent,
   registerForEvent,
   getEventRegistrations,
@@ -103,6 +104,7 @@ router.post(
   h(createEvent)
 );
 router.put('/:id', authenticate, h(updateEvent));
+router.delete('/:id', authenticate, h(deleteEvent));
 router.post('/:id/payment-intent', authenticate, registerRateLimit, h(createEventPaymentIntent));
 router.post('/:id/register', authenticate, registerRateLimit, h(registerForEvent));
 // Multi-tier cart checkout
