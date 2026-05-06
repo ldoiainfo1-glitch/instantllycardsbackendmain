@@ -285,10 +285,10 @@ export async function transferVoucher(req: AuthRequest, res: Response): Promise<
   try {
     transfer = await prisma.$transaction(async (tx) => {
       const activeClaim = await tx.voucherClaim.findFirst({
-        where: { voucher_id: vId, status: 'active' },
+        where: { voucher_id: vId, user_id: req.user!.userId, status: 'active' },
         select: { id: true, user_id: true },
       });
-      if (!activeClaim || activeClaim.user_id !== req.user!.userId) {
+      if (!activeClaim) {
         throw new Error('ACTIVE_CLAIM_OWNERSHIP_MISMATCH');
       }
 
@@ -420,6 +420,25 @@ export async function getMyTransfers(req: AuthRequest, res: Response): Promise<v
   const transfers = await prisma.voucherTransfer.findMany({
     where: { OR: [{ sender_id: userId }, { recipient_id: userId }] },
     orderBy: { transferred_at: 'desc' },
+    include: {
+      voucher: {
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          discount_type: true,
+          discount_value: true,
+          mrp: true,
+          amount: true,
+          voucher_image: true,
+          voucher_images: true,
+          company_logo: true,
+          business_name: true,
+        },
+      },
+      sender: { select: { id: true, name: true, profile_picture: true } },
+      recipient: { select: { id: true, name: true, profile_picture: true } },
+    },
   });
   res.json(transfers);
 }
