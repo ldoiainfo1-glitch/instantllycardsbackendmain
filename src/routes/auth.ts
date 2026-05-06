@@ -13,6 +13,7 @@ import {
   sendPasswordResetOTP,
   verifyPasswordResetOTP,
   resetPassword,
+  updateServiceType,
 } from "../controllers/authController";
 
 const router = Router();
@@ -169,6 +170,14 @@ router.post(
   ],
   validate,
   h(resetPassword),
+);
+
+router.post(
+  "/update-service-type",
+  authenticate,
+  [body("serviceType").notEmpty().withMessage("serviceType is required")],
+  validate,
+  h(updateServiceType),
 );
 
 export default router;

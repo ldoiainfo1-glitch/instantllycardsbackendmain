@@ -312,7 +312,7 @@ export async function login(req: Request, res: Response): Promise<void> {
     res.json({
       accessToken,
       refreshToken,
-      user: { id: user.id, phone: user.phone, email: user.email, name: user.name, roles },
+      user: { id: user.id, phone: user.phone, email: user.email, name: user.name, roles, service_type: user.service_type ?? null },
     });
 
     // Create welcome back notification in DB (once per day — skip if one was already created in last 24h)
@@ -602,5 +602,28 @@ export async function resetPassword(req: Request, res: Response): Promise<void> 
   } catch (err) {
     console.error('[FORGOT-PASSWORD] Failed to reset password', err);
     res.status(500).json({ error: 'Failed to reset password' });
+  }
+}
+
+export async function updateServiceType(req: AuthRequest, res: Response): Promise<void> {
+  const userId = req.user?.userId;
+  const { serviceType } = req.body;
+
+  const validTypes = ['home-based', 'business-visiting'];
+  if (!serviceType || !validTypes.includes(serviceType)) {
+    res.status(400).json({ error: `serviceType must be one of: ${validTypes.join(', ')}` });
+    return;
+  }
+
+  try {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { service_type: serviceType },
+    });
+    log(`[UPDATE-SERVICE-TYPE] userId: ${userId} set service_type: ${serviceType}`);
+    res.json({ message: 'Service type updated', service_type: serviceType });
+  } catch (err) {
+    console.error('[UPDATE-SERVICE-TYPE] Failed', err);
+    res.status(500).json({ error: 'Failed to update service type' });
   }
 }
