@@ -2395,3 +2395,126 @@ export async function deleteEvent(
   }
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// Offline Check-in — download attendee list + bulk sync
+// ════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /events/:id/checkin-list
+ * Returns a slim attendee list for offline QR scanning.
+ * Accessible by: event owner, admin, co-organizer, scanner.
+ */
+export async function getCheckinList(
+  req: AuthRequest,
+  res: Response,
+): Promise<void> {
+  const eventId = paramInt(req.params.id);
+  const userId = req.user!.userId;
+  try {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        business_promotion: { select: { user_id: true } },
+        business: { select: { user_id: true } },
+      },
+    });
+    if (!event) { res.status(404).json({ error: "Event not found" }); return; }
+
+    const ownerUserId = event.business_promotion?.user_id ?? event.business?.user_id ?? null;
+    const isOwnerOrAdmin = ownerUserId === userId || req.user!.roles.includes("admin");
+    const isStaff = isOwnerOrAdmin ? false : await canAccessEvent(eventId, userId, ["co_organizer", "scanner"]);
+    if (!isOwnerOrAdmin && !isStaff) {
+      res.status(403).json({ error: "Forbidden" }); return;
+    }
+
+    const registrations = await prisma.eventRegistration.findMany({
+      where: { event_id: eventId },
+      select: {
+        qr_code: true,
+        ticket_count: true,
+        checked_in: true,
+        checked_in_at: true,
+        cancelled_at: true,
+        refund_status: true,
+        user: { select: { name: true, phone: true } },
+      },
+      orderBy: { registered_at: "asc" },
+    });
+
+    res.json(registrations.map((r) => ({
+      qr_code: r.qr_code,
+      user_name: r.user?.name ?? "Unknown",
+      user_phone: r.user?.phone ?? "",
+      ticket_count: r.ticket_count,
+      checked_in: r.checked_in,
+      checked_in_at: r.checked_in_at,
+      is_cancelled: !!(r.cancelled_at || r.refund_status === "refunded"),
+    })));
+  } catch (err) {
+    console.error("[getCheckinList] ERROR:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+/**
+ * POST /events/:id/checkin-sync
+ * Bulk-applies offline check-ins collected when device had no internet.
+ * Body: { check_ins: Array<{ qr_code: string; checked_in_at: string }> }
+ */
+export async function syncCheckins(
+  req: AuthRequest,
+  res: Response,
+): Promise<void> {
+  const eventId = paramInt(req.params.id);
+  const userId = req.user!.userId;
+  const { check_ins } = req.body as { check_ins?: { qr_code: string; checked_in_at: string }[] };
+
+  if (!Array.isArray(check_ins) || check_ins.length === 0) {
+    res.status(400).json({ error: "check_ins must be a non-empty array" }); return;
+  }
+
+  try {
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        business_promotion: { select: { user_id: true } },
+        business: { select: { user_id: true } },
+      },
+    });
+    if (!event) { res.status(404).json({ error: "Event not found" }); return; }
+
+    const ownerUserId = event.business_promotion?.user_id ?? event.business?.user_id ?? null;
+    const isOwnerOrAdmin = ownerUserId === userId || req.user!.roles.includes("admin");
+    const isStaff = isOwnerOrAdmin ? false : await canAccessEvent(eventId, userId, ["co_organizer", "scanner"]);
+    if (!isOwnerOrAdmin && !isStaff) {
+      res.status(403).json({ error: "Forbidden" }); return;
+    }
+
+    let synced = 0, already_used = 0, not_found = 0, cancelled = 0;
+
+    for (const { qr_code, checked_in_at } of check_ins) {
+      const reg = await prisma.eventRegistration.findFirst({
+        where: { qr_code, event_id: eventId },
+      }) as any;
+      if (!reg) { not_found++; continue; }
+      if (reg.cancelled_at || reg.refund_status === "refunded") { cancelled++; continue; }
+      if (reg.checked_in) { already_used++; continue; }
+
+      const ts = new Date(checked_in_at);
+      const updated: number = await prisma.$executeRaw(
+        Prisma.sql`UPDATE "EventRegistration"
+                   SET "checked_in"    = true,
+                       "checked_in_at" = ${isNaN(ts.getTime()) ? new Date() : ts},
+                       "checked_in_by" = ${userId}
+                   WHERE "id" = ${reg.id} AND "checked_in" = false`,
+      );
+      if (updated === 0) { already_used++; } else { synced++; }
+    }
+
+    res.json({ synced, already_used, not_found, cancelled });
+  } catch (err) {
+    console.error("[syncCheckins] ERROR:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+

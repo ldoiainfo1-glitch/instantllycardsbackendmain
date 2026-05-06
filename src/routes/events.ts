@@ -18,6 +18,8 @@ import {
   createCartPaymentIntent,
   registerCartItems,
   getFriendAttendees,
+  getCheckinList,
+  syncCheckins,
 } from '../controllers/eventController';
 import {
   createTicketTier,
@@ -111,6 +113,8 @@ router.post('/:id/register', authenticate, registerRateLimit, h(registerForEvent
 router.post('/:id/payment-intent-cart', authenticate, registerRateLimit, h(createCartPaymentIntent));
 router.post('/:id/register-cart', authenticate, registerRateLimit, h(registerCartItems));
 router.post('/verify', authenticate, h(verifyRegistration));
+router.get('/:id/checkin-list', authenticate, h(getCheckinList));
+router.post('/:id/checkin-sync', authenticate, h(syncCheckins));
 
 // Phase 3 — Ticket tier CRUD (organizer/admin only for write paths)
 router.get('/:id/tickets', h(listTicketTiers));

@@ -9,8 +9,9 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    // Using DATABASE_URL (pooler, port 6543) so migrations work without IP allowlisting.
-    // Switch back to DIRECT_URL if session-level locks are needed.
-    url: process.env["DATABASE_URL"],
+    // Migrations require session-level advisory locks, which the transaction-mode
+    // pooler (port 6543) does NOT support. Use DIRECT_URL (port 5432 session
+    // pooler or the direct host). Falls back to DATABASE_URL if not set.
+    url: process.env["DIRECT_URL"] ?? process.env["DATABASE_URL"],
   },
 });
