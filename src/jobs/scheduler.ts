@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { cancelExpiredPromotions } from "./expiryJob";
 import { checkPushReceipts } from "../utils/push";
 import { dispatchEventReminders } from "./eventReminderJob";
+import { processInstallmentDeadlines } from "./installmentJob";
 
 /**
  * Registers all scheduled jobs.
@@ -35,7 +36,16 @@ export function startScheduledJobs(): void {
     }
   });
 
+  // Installment deadlines — hourly: send 3-day reminders + auto-expire overdue claims.
+  cron.schedule("15 * * * *", async () => {
+    try {
+      await processInstallmentDeadlines();
+    } catch (err) {
+      console.error("[CRON] Installment deadline job failed:", err);
+    }
+  });
+
   console.log(
-    "[CRON] Scheduled jobs registered (expiry: every hour | push receipts: every 30 min | event reminders: every 30 min)",
+    "[CRON] Scheduled jobs registered (expiry: every hour | push receipts: every 30 min | event reminders: every 30 min | installments: every hour)",
   );
 }

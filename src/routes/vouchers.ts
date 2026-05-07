@@ -12,17 +12,30 @@ import {
   getMyVouchers,
   getMyCreatedVouchers,
   getMyTransfers,
+  getVoucherClaims,
   redeemVoucher,
   updateVoucherStatus,
+  updateVoucher,
+  deleteVoucher,
   createVoucherPaymentIntent,
   verifyVoucherPayment,
 } from '../controllers/voucherController';
+import {
+  createInstallmentPaymentIntent,
+  verifyInstallmentPayment,
+  getInstallmentStatus,
+  getMyInstallments,
+  getVoucherInstallmentLedger,
+} from '../controllers/installmentController';
 
 const router = Router();
 const h = (fn: Function) => fn as RequestHandler;
 
 router.get('/', h(listVouchers));
 router.get('/my', authenticate, h(getMyVouchers));
+router.get('/my-installments', authenticate, h(getMyInstallments));
+router.get('/:voucherId/installment-ledger', authenticate, h(getVoucherInstallmentLedger));
+router.get('/:voucherId/claims', authenticate, h(getVoucherClaims));
 router.get('/created', authenticate, requireRole('business', 'admin'), h(getMyCreatedVouchers));
 router.get('/transfers', authenticate, h(getMyTransfers));
 router.get('/:id', h(getVoucher));
@@ -56,7 +69,27 @@ router.post(
   validate,
   h(verifyVoucherPayment)
 );
+
+// Installment payment routes
+router.get('/claims/:claimId/installment', authenticate, h(getInstallmentStatus));
+router.post('/claims/:claimId/installment/pay', authenticate, [body('amount').isFloat({ min: 1 })], validate, h(createInstallmentPaymentIntent));
+router.post(
+  '/claims/:claimId/installment/verify',
+  authenticate,
+  [
+    body('razorpay_order_id').notEmpty(),
+    body('razorpay_payment_id').notEmpty(),
+    body('razorpay_signature').notEmpty(),
+    body('amount').isFloat({ min: 1 }),
+  ],
+  validate,
+  h(verifyInstallmentPayment)
+);
+
 router.patch('/:id/status', authenticate, [body('status').notEmpty()], validate, h(updateVoucherStatus));
+router.patch('/:id', authenticate, h(updateVoucher));
+router.put('/:id', authenticate, h(updateVoucher));
+router.delete('/:id', authenticate, h(deleteVoucher));
 router.post('/redeem', authenticate, [body('voucher_id').isInt()], validate, h(redeemVoucher));
 router.post(
   '/transfer',
