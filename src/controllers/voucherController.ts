@@ -124,6 +124,16 @@ export async function createVoucher(req: AuthRequest, res: Response): Promise<vo
     res.status(400).json({ error: 'title is required' });
     return;
   }
+  // Reject local/non-http URIs for image fields
+  const isWebUrlOrEmpty = (u: any) => !u || (typeof u === 'string' && /^https?:\/\//i.test(u));
+  if (!isWebUrlOrEmpty(voucher_image)) {
+    res.status(400).json({ error: 'voucher_image must be a public https URL. Upload via /api/uploads/image first.' });
+    return;
+  }
+  if (!isWebUrlOrEmpty(voucher_banner)) {
+    res.status(400).json({ error: 'voucher_banner must be a public https URL. Upload via /api/uploads/image first.' });
+    return;
+  }
 
   const inputPromotionId = parseOptionalInt(business_promotion_id ?? promotionId);
 
@@ -630,8 +640,24 @@ export async function updateVoucher(req: AuthRequest, res: Response): Promise<vo
   if (b.phone_number !== undefined) data.phone_number = b.phone_number || null;
   if (b.address !== undefined) data.address = b.address || null;
   if (b.terms !== undefined) data.terms = b.terms || null;
-  if (b.voucher_image !== undefined) data.voucher_image = b.voucher_image || null;
-  if (b.voucher_banner !== undefined) data.voucher_banner = b.voucher_banner || null;
+  // Reject local/non-http URIs (file://, content://, ph://, data:) — these are
+  // device-local and would only render on the uploader's phone. The mobile
+  // client must upload via /api/uploads/image first and submit the returned URL.
+  const isWebUrl = (u: any) => typeof u === 'string' && /^https?:\/\//i.test(u);
+  if (b.voucher_image !== undefined) {
+    if (b.voucher_image && !isWebUrl(b.voucher_image)) {
+      res.status(400).json({ error: 'voucher_image must be a public https URL. Upload the image first via /api/uploads/image.' });
+      return;
+    }
+    data.voucher_image = b.voucher_image || null;
+  }
+  if (b.voucher_banner !== undefined) {
+    if (b.voucher_banner && !isWebUrl(b.voucher_banner)) {
+      res.status(400).json({ error: 'voucher_banner must be a public https URL. Upload the image first via /api/uploads/image.' });
+      return;
+    }
+    data.voucher_banner = b.voucher_banner || null;
+  }
   if (b.what_we_do !== undefined) data.what_we_do = b.what_we_do || null;
   if (b.website !== undefined) data.website = b.website || null;
   if (b.status !== undefined) {
