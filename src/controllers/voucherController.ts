@@ -915,11 +915,19 @@ export async function verifyVoucherPayment(req: AuthRequest, res: Response): Pro
 
     // Installment plan details passed from payment body
     const { promo_applied, allows_installment: frontendAllowsInstallment } = req.body;
-    const voucher2 = await prisma.voucher.findUnique({
+    const voucher2Raw = await prisma.voucher.findUnique({
       where: { id },
-      select: { allows_installment: true, upfront_amount: true, discounted_price: true, original_price: true },
+      select: {
+        allows_installment: true,
+        upfront_amount: true,
+        mrp: true,
+        amount: true,
+        discount_value: true,
+        discount_type: true,
+      },
     });
-    
+    const voucher2 = decorateVoucher(voucher2Raw);
+
     // Recalculate total price from DB — never trust client-supplied amount
     const totalPrice = promo_applied
       ? Number(voucher2?.discounted_price || voucher2?.original_price || 0)
