@@ -1,0 +1,3 @@
+ALTER TABLE "Voucher"
+  ADD COLUMN IF NOT EXISTS "subtitle" TEXT,
+  ADD COLUMN IF NOT EXISTS "terms" TEXT;

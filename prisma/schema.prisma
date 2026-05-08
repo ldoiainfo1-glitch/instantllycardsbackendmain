@@ -267,10 +267,16 @@ model Voucher {
   business_promotion_id Int
   business_name         String
   title                 String
+  subtitle              String?
   description           String?
   discount_type         String
   discount_value        Float
   code                  String?              @unique
+  allows_installment    Boolean              @default(false)
+  upfront_amount        Decimal?             @db.Decimal(10, 2)
+  what_we_do            String?
+  website               String?
+  voucher_banner        String?
   max_claims            Int?
   claimed_count         Int                  @default(0)
   expires_at            DateTime?
@@ -296,6 +302,7 @@ model Voucher {
   amount                Float?
   discount_percentage   Float?
   validity              String?
+  terms                 String?
   voucher_image         String?
   min_vouchers_required Int?
   template_id           Int?
@@ -330,19 +337,36 @@ model Voucher {
 }
 
 model VoucherClaim {
-  id          Int       @id @default(autoincrement())
-  legacy_id   String?   @unique
-  voucher_id  Int
-  user_id     Int
-  claimed_at  DateTime  @default(now())
-  redeemed_at DateTime?
-  status      String    @default("active")
-  user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  voucher     Voucher   @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
+  id                   Int                  @id @default(autoincrement())
+  legacy_id            String?              @unique
+  voucher_id           Int
+  user_id              Int
+  claimed_at           DateTime             @default(now())
+  redeemed_at          DateTime?
+  status               String               @default("active")
+  remaining_balance    Decimal?             @db.Decimal(10, 2)
+  paid_amount          Decimal?             @db.Decimal(10, 2)
+  installment_deadline DateTime?
+  installment_status   String?
+  user                 User                 @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  voucher              Voucher              @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
+  installment_payments InstallmentPayment[]
 
   @@unique([user_id, voucher_id])
   @@index([voucher_id, status])
   @@index([voucher_id, user_id, status])
+}
+
+model InstallmentPayment {
+  id                  Int          @id @default(autoincrement())
+  claim_id            Int
+  amount              Decimal      @db.Decimal(10, 2)
+  paid_at             DateTime     @default(now())
+  razorpay_order_id   String
+  razorpay_payment_id String
+  claim               VoucherClaim @relation(fields: [claim_id], references: [id], onDelete: Cascade)
+
+  @@index([claim_id])
 }
 
 model VoucherTransfer {
