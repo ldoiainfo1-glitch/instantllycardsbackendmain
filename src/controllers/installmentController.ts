@@ -52,6 +52,15 @@ export async function createInstallmentPaymentIntent(req: AuthRequest, res: Resp
     const payAmount = Math.min(amount, remaining);
     const amountPaise = Math.round(payAmount * 100);
 
+    // Razorpay single-payment cap: ₹5,00,000 (50,00,000 paise)
+    const RAZORPAY_MAX_PAISE = 50_00_000;
+    if (amountPaise > RAZORPAY_MAX_PAISE) {
+      res.status(400).json({
+        error: `Single payment cannot exceed ₹5,00,000. Please pay in smaller amounts.`,
+      });
+      return;
+    }
+
     const order = await createRazorpayOrder({
       amountPaise,
       currency: 'INR',
@@ -339,19 +348,36 @@ export async function getVoucherInstallmentLedger(req: AuthRequest, res: Respons
     });
 
     res.json(
-      claims.map((c) => ({
-        claim_id: c.id,
-        user_name: c.user.name,
-        user_phone: c.user.phone,
-        remaining_balance: Number(c.remaining_balance ?? 0),
-        paid_amount: Number(c.paid_amount ?? 0),
-        installment_deadline: c.installment_deadline,
-        installment_status: c.installment_status,
-        payments: c.installment_payments.map((p) => ({
-          amount: Number(p.amount),
-          paid_at: p.paid_at,
-        })),
-      }))
+      claims.map((c) => {
+        const totalInstallmentsPaid = c.installment_payments.reduce(
+          (sum, p) => sum + Number(p.amount),
+          0,
+        );
+        const totalPaid = Number(c.paid_amount ?? 0);
+        const upfrontAmount = Math.max(0, totalPaid - totalInstallmentsPaid);
+        const lastPayment = c.installment_payments[0]
+          ? { amount: Number(c.installment_payments[0].amount), paid_at: c.installment_payments[0].paid_at }
+          : upfrontAmount > 0
+          ? { amount: upfrontAmount, paid_at: c.claimed_at, type: 'upfront' as const }
+          : null;
+        return {
+          claim_id: c.id,
+          user_name: c.user.name,
+          user_phone: c.user.phone,
+          claimed_at: c.claimed_at,
+          upfront_amount: upfrontAmount,
+          remaining_balance: Number(c.remaining_balance ?? 0),
+          paid_amount: totalPaid,
+          installment_deadline: c.installment_deadline,
+          installment_status: c.installment_status,
+          last_payment: lastPayment,
+          payments: c.installment_payments.map((p) => ({
+            amount: Number(p.amount),
+            paid_at: p.paid_at,
+            type: 'installment' as const,
+          })),
+        };
+      })
     );
   } catch (err) {
     console.error('[INSTALLMENT] Failed to get installment ledger', err);
