@@ -60,17 +60,39 @@ export async function listVouchers(req: Request, res: Response): Promise<void> {
   const page = queryInt(req.query.page, 1);
   const limit = queryInt(req.query.limit, 20);
   const now = new Date();
+  // Use start-of-day so a voucher whose expiry is "today" (stored at 00:00 UTC)
+  // is still considered active for the whole day.
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const cityRaw = typeof req.query.city === 'string' ? req.query.city.trim() : '';
+  const pincodeRaw = typeof req.query.pincode === 'string' ? req.query.pincode.trim() : '';
+
+  const where: any = {
+    status: 'active',
+    OR: [
+      { expiry_date: null, expires_at: null },
+      { expiry_date: { gte: startOfToday } },
+      { AND: [{ expiry_date: null }, { expires_at: { gte: startOfToday } }] },
+    ],
+  };
+
+  // Location-based filter: match user's city (case-insensitive contains, so
+  // "Mumbai" matches "Mumbai Suburban" etc.) OR exact pincode. Legacy vouchers
+  // without city/pincode are still included so older records remain visible.
+  const locationOr: any[] = [];
+  if (cityRaw) {
+    locationOr.push({ city: { contains: cityRaw, mode: 'insensitive' } });
+  }
+  if (pincodeRaw) {
+    locationOr.push({ pincode: pincodeRaw });
+  }
+  if (locationOr.length > 0) {
+    locationOr.push({ AND: [{ city: null }, { pincode: null }] });
+    where.AND = [{ OR: locationOr }];
+  }
 
   const vouchers = await prisma.voucher.findMany({
-    where: {
-      status: 'active',
-      OR: [
-        { expiry_date: null },
-        { expiry_date: { gt: now } },
-        { AND: [{ expiry_date: null }, { expires_at: null }] },
-        { AND: [{ expiry_date: null }, { expires_at: { gt: now } }] },
-      ],
-    },
+    where,
     skip: (page - 1) * limit,
     take: limit,
     orderBy: { created_at: 'desc' },
@@ -112,6 +134,8 @@ export async function createVoucher(req: AuthRequest, res: Response): Promise<vo
     company_name,
     phone_number,
     address,
+    city,
+    pincode,
     voucher_image,
     voucher_banner,
     what_we_do,
@@ -122,6 +146,14 @@ export async function createVoucher(req: AuthRequest, res: Response): Promise<vo
 
   if (!title) {
     res.status(400).json({ error: 'title is required' });
+    return;
+  }
+  if (!city || typeof city !== 'string' || !city.trim()) {
+    res.status(400).json({ error: 'city is required' });
+    return;
+  }
+  if (!pincode || typeof pincode !== 'string' || !pincode.trim()) {
+    res.status(400).json({ error: 'pincode is required' });
     return;
   }
   // Reject local/non-http URIs for image fields
@@ -220,6 +252,8 @@ export async function createVoucher(req: AuthRequest, res: Response): Promise<vo
       company_name: company_name || null,
       phone_number: phone_number || null,
       address: address || null,
+      city: city.trim(),
+      pincode: pincode.trim(),
       terms: terms || null,
       voucher_image: voucher_image || null,
       voucher_banner: voucher_banner || null,
@@ -639,6 +673,20 @@ export async function updateVoucher(req: AuthRequest, res: Response): Promise<vo
   if (b.company_name !== undefined) data.company_name = b.company_name || null;
   if (b.phone_number !== undefined) data.phone_number = b.phone_number || null;
   if (b.address !== undefined) data.address = b.address || null;
+  if (b.city !== undefined) {
+    if (!b.city || typeof b.city !== 'string' || !b.city.trim()) {
+      res.status(400).json({ error: 'City is required' });
+      return;
+    }
+    data.city = b.city.trim();
+  }
+  if (b.pincode !== undefined) {
+    if (!b.pincode || typeof b.pincode !== 'string' || !b.pincode.trim()) {
+      res.status(400).json({ error: 'Pincode is required' });
+      return;
+    }
+    data.pincode = b.pincode.trim();
+  }
   if (b.terms !== undefined) data.terms = b.terms || null;
   // Reject local/non-http URIs (file://, content://, ph://, data:) — these are
   // device-local and would only render on the uploader's phone. The mobile
