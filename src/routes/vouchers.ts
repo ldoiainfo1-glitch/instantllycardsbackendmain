@@ -13,7 +13,9 @@ import {
   getMyCreatedVouchers,
   getMyTransfers,
   getVoucherClaims,
+  getAllMyClaims,
   redeemVoucher,
+  redeemVoucherByQr,
   updateVoucherStatus,
   updateVoucher,
   deleteVoucher,
@@ -35,6 +37,7 @@ router.get('/', h(listVouchers));
 router.get('/my', authenticate, h(getMyVouchers));
 router.get('/my-installments', authenticate, h(getMyInstallments));
 router.get('/:voucherId/installment-ledger', authenticate, h(getVoucherInstallmentLedger));
+router.get('/all-claims', authenticate, h(getAllMyClaims));
 router.get('/:voucherId/claims', authenticate, h(getVoucherClaims));
 router.get('/created', authenticate, requireRole('business', 'admin'), h(getMyCreatedVouchers));
 router.get('/transfers', authenticate, h(getMyTransfers));
@@ -91,6 +94,13 @@ router.patch('/:id', authenticate, h(updateVoucher));
 router.put('/:id', authenticate, h(updateVoucher));
 router.delete('/:id', authenticate, h(deleteVoucher));
 router.post('/redeem', authenticate, [body('voucher_id').isInt()], validate, h(redeemVoucher));
+router.post(
+  '/redeem-by-qr',
+  authenticate,
+  [body('voucher_id').isInt(), body('claim_id').isInt()],
+  validate,
+  h(redeemVoucherByQr)
+);
 router.post(
   '/transfer',
   authenticate,
