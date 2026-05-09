@@ -105,6 +105,7 @@ export async function listVouchers(req: Request, res: Response): Promise<void> {
 
 export async function getVoucher(req: Request, res: Response): Promise<void> {
   const id = paramInt(req.params.id);
+  if (!id || isNaN(id)) { res.status(404).json({ error: 'Not found' }); return; }
   const voucher = await prisma.voucher.findUnique({
     where: { id },
     include: { business_promotion: true },
@@ -499,16 +500,93 @@ export async function getMyCreatedVouchers(req: AuthRequest, res: Response): Pro
     return;
   }
 
+  const voucherWhere = promotionId
+    ? { business_promotion_id: promotionId }
+    : { business_promotion_id: { in: promotionIds } };
+
   const vouchers = await prisma.voucher.findMany({
-    where: {
-      ...(promotionId
-        ? { business_promotion_id: promotionId }
-        : { business_promotion_id: { in: promotionIds } }),
-    },
+    where: voucherWhere,
     orderBy: { created_at: 'desc' },
     include: { business_promotion: { select: { id: true, business_name: true, tier: true, status: true, payment_status: true } } },
   });
-  res.json(vouchers.map(decorateVoucher));
+
+  const voucherIds = vouchers.map((v) => v.id);
+  const claimGroups = voucherIds.length > 0
+    ? await prisma.voucherClaim.groupBy({
+        by: ['voucher_id', 'status'],
+        where: { voucher_id: { in: voucherIds } },
+        _count: { _all: true },
+      })
+    : [];
+
+  // Build a map: voucherId -> { active, redeemed, expired, ... }
+  const statusCountMap: Record<number, Record<string, number>> = {};
+  for (const g of claimGroups) {
+    if (!statusCountMap[g.voucher_id]) statusCountMap[g.voucher_id] = {};
+    statusCountMap[g.voucher_id][g.status] = g._count._all;
+  }
+
+  res.json(vouchers.map((v) => {
+    const counts = statusCountMap[v.id] ?? {};
+    return {
+      ...decorateVoucher(v),
+      active_claims: counts['active'] ?? 0,
+      redeemed_claims: counts['redeemed'] ?? 0,
+      expired_claims: counts['expired'] ?? 0,
+    };
+  }));
+}
+
+/**
+ * GET /vouchers/all-claims?status=active|redeemed|expired
+ * Returns all claims across all vouchers owned by the authenticated user.
+ * Includes voucher title for display.
+ */
+export async function getAllMyClaims(req: AuthRequest, res: Response): Promise<void> {
+  const status = typeof req.query.status === 'string' ? req.query.status.trim() : undefined;
+
+  const promotions = await prisma.businessPromotion.findMany({
+    where: { user_id: req.user!.userId },
+    select: { id: true },
+  });
+  const promotionIds = promotions.map((p) => p.id);
+
+  const vouchers = await prisma.voucher.findMany({
+    where: { business_promotion_id: { in: promotionIds } },
+    select: { id: true, title: true },
+  });
+  const voucherIds = vouchers.map((v) => v.id);
+  const voucherTitleMap: Record<number, string> = {};
+  for (const v of vouchers) voucherTitleMap[v.id] = v.title;
+
+  if (voucherIds.length === 0) {
+    res.json([]);
+    return;
+  }
+
+  const claims = await prisma.voucherClaim.findMany({
+    where: {
+      voucher_id: { in: voucherIds },
+      ...(status ? { status } : {}),
+    },
+    include: {
+      user: { select: { name: true, phone: true } },
+    },
+    orderBy: { claimed_at: 'desc' },
+  });
+
+  res.json(
+    claims.map((c) => ({
+      claim_id: c.id,
+      voucher_id: c.voucher_id,
+      voucher_title: voucherTitleMap[c.voucher_id] ?? '—',
+      user_name: c.user.name,
+      user_phone: c.user.phone,
+      status: c.status,
+      claimed_at: c.claimed_at,
+      redeemed_at: c.redeemed_at,
+    }))
+  );
 }
 
 /**
@@ -850,6 +928,91 @@ export async function redeemVoucher(req: AuthRequest, res: Response): Promise<vo
     claimed_at: updated.claimed_at,
     redeemed_at: updated.redeemed_at,
     status: updated.status,
+  });
+}
+
+/**
+ * POST /vouchers/redeem-by-qr
+ * Called by the business owner's VoucherScanner screen.
+ * Body: { voucher_id: number, claim_id: number }
+ * Validates the claim belongs to the voucher and that the caller is the voucher owner,
+ * then marks the claim as redeemed.
+ */
+export async function redeemVoucherByQr(req: AuthRequest, res: Response): Promise<void> {
+  const voucherId = parseOptionalInt(req.body.voucher_id);
+  const claimId = parseOptionalInt(req.body.claim_id);
+
+  if (!voucherId || !claimId) {
+    res.status(400).json({ error: 'voucher_id and claim_id are required' });
+    return;
+  }
+
+  // Fetch voucher and verify caller is the owner
+  const voucher = await prisma.voucher.findUnique({
+    where: { id: voucherId },
+    select: { id: true, title: true, status: true, owner_user_id: true, expiry_date: true, expires_at: true },
+  });
+  if (!voucher) { res.status(404).json({ error: 'Voucher not found' }); return; }
+  if (voucher.owner_user_id !== req.user!.userId) {
+    res.status(403).json({ error: 'Only the voucher owner can scan and redeem vouchers' }); return;
+  }
+
+  // Fetch the specific claim
+  const claim = await prisma.voucherClaim.findUnique({
+    where: { id: claimId },
+    include: { user: { select: { id: true, name: true, phone: true } } },
+  });
+  if (!claim || claim.voucher_id !== voucherId) {
+    res.status(404).json({ error: 'QR code not valid for this voucher' }); return;
+  }
+
+  // Already redeemed — idempotent success so the scanner shows the right state
+  if (claim.status === 'redeemed' || claim.redeemed_at) {
+    res.status(200).json({
+      already_redeemed: true,
+      id: claim.id,
+      voucher_id: claim.voucher_id,
+      redeemed_at: claim.redeemed_at,
+      user: claim.user,
+    });
+    return;
+  }
+
+  if (claim.status !== 'active') {
+    res.status(409).json({ error: `Claim is ${claim.status} — cannot redeem` }); return;
+  }
+
+  // Check voucher expiry
+  const expiry = getVoucherExpiry(voucher);
+  if (expiry && expiry <= new Date()) {
+    res.status(400).json({ error: 'Voucher has expired' }); return;
+  }
+
+  const now = new Date();
+  const updated = await prisma.$transaction(async (tx) => {
+    const result = await tx.voucherClaim.updateMany({
+      where: { id: claimId, status: 'active', redeemed_at: null },
+      data: { status: 'redeemed', redeemed_at: now },
+    });
+    if (result.count === 0) {
+      // Race condition — another scan beat us
+      return tx.voucherClaim.findUnique({ where: { id: claimId }, include: { user: { select: { id: true, name: true, phone: true } } } });
+    }
+    await tx.voucherRedemption.upsert({
+      where: { voucher_id_used_by_id: { voucher_id: voucherId, used_by_id: claim.user_id } },
+      update: {},
+      create: { voucher_id: voucherId, used_by_id: claim.user_id, used_at: now },
+    });
+    return tx.voucherClaim.findUnique({ where: { id: claimId }, include: { user: { select: { id: true, name: true, phone: true } } } });
+  });
+
+  const isAlreadyRedeemed = updated?.status === 'redeemed' && updated?.redeemed_at?.getTime() !== now.getTime();
+  res.json({
+    already_redeemed: isAlreadyRedeemed ?? false,
+    id: updated!.id,
+    voucher_id: updated!.voucher_id,
+    redeemed_at: updated!.redeemed_at,
+    user: updated!.user,
   });
 }
 
