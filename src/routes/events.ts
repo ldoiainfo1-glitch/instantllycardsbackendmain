@@ -6,6 +6,7 @@ import { authenticate, requireRole } from '../middleware/auth';
 import {
   listEvents,
   getEvent,
+  shareEventPage,
   listMyEvents,
   createEvent,
   updateEvent,
@@ -89,6 +90,7 @@ const registerRateLimit =
 router.get('/', h(listEvents));
 router.get('/my', authenticate, h(listMyEvents)); // role-gating moved into controller (handles owner + staff)
 router.get('/registrations/my', authenticate, h(getMyRegistrations));
+router.get('/:id/share', h(shareEventPage));
 router.get('/:id', h(getEvent));
 router.get('/:id/friend-attendees', authenticate, h(getFriendAttendees));
 router.get('/:id/registrations', authenticate, h(getEventRegistrations));
