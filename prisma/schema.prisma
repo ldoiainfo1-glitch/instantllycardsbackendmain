@@ -299,6 +299,8 @@ model Voucher {
   company_name          String?
   phone_number          String?
   address               String?
+  city                  String?
+  pincode               String?
   amount                Float?
   discount_percentage   Float?
   validity              String?
