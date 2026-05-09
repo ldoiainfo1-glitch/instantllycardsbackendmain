@@ -2518,3 +2518,97 @@ export async function syncCheckins(
   }
 }
 
+/** GET /api/events/:id/share
+ *  Returns an HTML page with Open Graph meta tags so WhatsApp shows a rich
+ *  preview (image + title + description). Includes a JS smart redirect:
+ *    • If the app is installed → opens instantllycards://event/:id
+ *    • Otherwise → redirects to Play Store after a short delay
+ */
+export async function shareEventPage(req: Request, res: Response): Promise<void> {
+  const id = paramInt(req.params.id);
+  try {
+    const event = await prisma.event.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        image_url: true,
+        venue: true,
+        location: true,
+        date: true,
+        time: true,
+      },
+    });
+
+    if (!event) {
+      res.status(404).send('Event not found');
+      return;
+    }
+
+    const title = event.title ?? 'Event';
+    const description = event.description
+      ? event.description.slice(0, 200)
+      : `Join us at ${event.venue || event.location || 'this event'}`;
+    const image = event.image_url ?? '';
+    const venue = event.venue || event.location || '';
+    const dateStr = event.date
+      ? new Date(event.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+      : '';
+    const deepLink = `instantllycards://event/${event.id}`;
+    const playStore = `https://play.google.com/store/apps/details?id=com.instantllycards.www.twa&referrer=ic_event_${event.id}`;
+    // Android Intent URL: opens app if installed, falls back to Play Store — works reliably on user gesture in Chrome
+    const intentUrl = `intent://event/${event.id}#Intent;scheme=instantllycards;package=com.instantllycards.www.twa;S.browser_fallback_url=${encodeURIComponent(playStore)};end`;
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${title}</title>
+  <meta name="description" content="${description}" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="${title}" />
+  <meta property="og:description" content="${description}${venue ? ' · ' + venue : ''}${dateStr ? ' · ' + dateStr : ''}" />
+  ${image ? `<meta property="og:image" content="${image}" />` : ''}
+  <meta property="og:url" content="https://api.instantllycards.com/api/events/${event.id}/share" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f8f9fa; color: #333; text-align: center; padding: 24px; box-sizing: border-box; }
+    h1 { font-size: 1.5rem; margin-bottom: 8px; }
+    p { color: #666; margin-bottom: 24px; }
+    a.btn { background: #0F6FFF; color: #fff; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 1rem; }
+  </style>
+</head>
+<body>
+  ${image ? `<img src="${image}" alt="${title}" style="max-width:100%;max-height:240px;border-radius:12px;margin-bottom:20px;object-fit:cover;" />` : ''}
+  <h1>${title}</h1>
+  <p>${venue ? venue + (dateStr ? ' · ' + dateStr : '') : dateStr}</p>
+  <a class="btn" href="${intentUrl}">Open in App</a>
+  <p style="margin-top:16px;font-size:0.85rem;">Don't have the app? <a href="${playStore}">Download from Play Store</a></p>
+  <script>
+    // On Android, the intent URL handles both "app installed" and "not installed" cases.
+    // Chrome blocks auto custom-scheme redirects without user gesture, so we just
+    // try the intent URL immediately (works in Chrome, silent fail elsewhere → user taps button).
+    var ua = navigator.userAgent || '';
+    if (/android/i.test(ua)) {
+      window.location.href = '${intentUrl}';
+    } else {
+      // iOS / other: try custom scheme, fall back to App Store after delay
+      window.location.href = '${deepLink}';
+      setTimeout(function() {
+        window.location.href = 'https://apps.apple.com/app/instantllycards';
+      }, 1500);
+    }
+  </script>
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch (err) {
+    console.error('[shareEventPage] ERROR:', err);
+    res.status(500).send('Internal server error');
+  }
+}
+
