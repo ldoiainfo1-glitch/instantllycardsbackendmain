@@ -339,6 +339,7 @@ export async function claimVoucher(req: AuthRequest, res: Response): Promise<voi
 export async function transferVoucher(req: AuthRequest, res: Response): Promise<void> {
   const { voucher_id, recipient_phone } = req.body;
   const vId = parseInt(voucher_id, 10);
+  const transferQty = Math.max(1, Math.floor(Number(req.body.quantity ?? 1)));
 
   const voucher = await prisma.voucher.findUnique({ where: { id: vId } });
   if (!voucher) { res.status(404).json({ error: 'Voucher not found' }); return; }
@@ -354,51 +355,74 @@ export async function transferVoucher(req: AuthRequest, res: Response): Promise<
     return;
   }
 
+  const senderRemaining = (senderClaim.quantity ?? 1) - (senderClaim.redeemed_count ?? 0);
+  if (transferQty > senderRemaining) {
+    res.status(400).json({ error: `You only have ${senderRemaining} unredeemed voucher(s) to transfer` });
+    return;
+  }
+
   const variants = phoneVariants(recipient_phone || '');
   const recipient = await prisma.user.findFirst({
     where: { OR: variants.map((p) => ({ phone: p })) },
   });
   if (!recipient) { res.status(404).json({ error: 'Recipient not found' }); return; }
+  if (recipient.id === req.user!.userId) {
+    res.status(400).json({ error: 'You cannot transfer a voucher to yourself' }); return;
+  }
 
   const sender = await prisma.user.findUnique({ where: { id: req.user!.userId } });
   const normalizedRecipientPhone = normalizePhone(recipient_phone);
+  const fullyTransferred = transferQty >= senderRemaining;
 
   let transfer;
   try {
     transfer = await prisma.$transaction(async (tx) => {
+      // Re-check sender's claim inside transaction to avoid race conditions
       const activeClaim = await tx.voucherClaim.findFirst({
         where: { voucher_id: vId, user_id: req.user!.userId, status: 'active' },
-        select: { id: true, user_id: true },
+        select: { id: true, quantity: true, redeemed_count: true },
       });
-      if (!activeClaim) {
-        throw new Error('ACTIVE_CLAIM_OWNERSHIP_MISMATCH');
+      if (!activeClaim) throw new Error('ACTIVE_CLAIM_OWNERSHIP_MISMATCH');
+
+      const currentRemaining = (activeClaim.quantity ?? 1) - (activeClaim.redeemed_count ?? 0);
+      if (transferQty > currentRemaining) throw new Error('INSUFFICIENT_REMAINING');
+
+      if (fullyTransferred) {
+        // Mark entire claim as transferred
+        await tx.voucherClaim.update({
+          where: { id: senderClaim.id },
+          data: { status: 'transferred' },
+        });
+      } else {
+        // Reduce sender's quantity by transferQty (keeps the claim active)
+        await tx.voucherClaim.update({
+          where: { id: senderClaim.id },
+          data: { quantity: { decrement: transferQty } },
+        });
       }
 
-      await tx.voucherClaim.update({
-        where: { id: senderClaim.id },
-        data: { status: 'transferred' },
-      });
-
-      const existingActiveForRecipient = await tx.voucherClaim.findFirst({
-        where: { voucher_id: vId, user_id: recipient.id, status: 'active' },
-        select: { id: true },
-      });
-      if (existingActiveForRecipient) {
-        throw new Error('RECIPIENT_ALREADY_ACTIVE_OWNER');
-      }
-
+      // Give recipient their vouchers (create or increment their claim)
       const existingRecipientClaim = await tx.voucherClaim.findUnique({
         where: { user_id_voucher_id: { user_id: recipient.id, voucher_id: vId } },
       });
 
       if (existingRecipientClaim) {
-        await tx.voucherClaim.update({
-          where: { id: existingRecipientClaim.id },
-          data: { status: 'active', claimed_at: new Date(), redeemed_at: null },
-        });
+        if (existingRecipientClaim.status === 'active') {
+          // Add to their existing active claim
+          await tx.voucherClaim.update({
+            where: { id: existingRecipientClaim.id },
+            data: { quantity: { increment: transferQty } },
+          });
+        } else {
+          // Reactivate their old claim and top up quantity
+          await tx.voucherClaim.update({
+            where: { id: existingRecipientClaim.id },
+            data: { status: 'active', claimed_at: new Date(), redeemed_at: null, quantity: { increment: transferQty } },
+          });
+        }
       } else {
         await tx.voucherClaim.create({
-          data: { voucher_id: vId, user_id: recipient.id, status: 'active' },
+          data: { voucher_id: vId, user_id: recipient.id, status: 'active', quantity: transferQty },
         });
       }
 
@@ -409,6 +433,7 @@ export async function transferVoucher(req: AuthRequest, res: Response): Promise<
           recipient_id: recipient.id,
           sender_phone: sender!.phone,
           recipient_phone: normalizedRecipientPhone,
+          quantity: transferQty,
         },
       });
     });
@@ -417,8 +442,8 @@ export async function transferVoucher(req: AuthRequest, res: Response): Promise<
       res.status(409).json({ error: 'Voucher claim ownership changed. Please refresh and retry.' });
       return;
     }
-    if (err instanceof Error && err.message === 'RECIPIENT_ALREADY_ACTIVE_OWNER') {
-      res.status(409).json({ error: 'Recipient already owns this voucher' });
+    if (err instanceof Error && err.message === 'INSUFFICIENT_REMAINING') {
+      res.status(409).json({ error: 'Not enough unredeemed vouchers to transfer. Please refresh and retry.' });
       return;
     }
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
@@ -433,20 +458,139 @@ export async function transferVoucher(req: AuthRequest, res: Response): Promise<
     const recipientUser = await prisma.user.findUnique({ where: { id: recipient.id }, select: { id: true, push_token: true } });
     if (recipientUser) {
       const io = getIO();
-      const payload = { type: 'voucher:transferred', transferId: transfer.id, voucherId: vId, voucherTitle: voucher.title, senderName: sender?.name ?? 'Someone' };
+      const payload = { type: 'voucher:transferred', transferId: transfer.id, voucherId: vId, voucherTitle: voucher.title, quantity: transferQty, senderName: sender?.name ?? 'Someone' };
       if (io) io.to(`user:${recipientUser.id}`).emit('voucher:transferred', payload);
       await notify({
         pushToken: recipientUser.push_token,
         userId: recipientUser.id,
         title: 'Voucher Received',
-        body: `${sender?.name ?? 'Someone'} transferred a voucher "${voucher.title}" to you`,
+        body: `${sender?.name ?? 'Someone'} transferred ${transferQty > 1 ? `${transferQty}× ` : ''}"${voucher.title}" to you`,
         type: 'voucher_transferred',
-        data: { screen: 'Vouchers' },
+        data: { screen: 'MyVouchers' },
       });
     }
   } catch { /* non-blocking */ }
 
-  res.status(201).json(transfer);
+  res.status(201).json({ ...transfer, quantity: transferQty });
+}
+
+/**
+ * POST /vouchers/:id/owner-transfer
+ * Allows the voucher owner (business promotion owner) to gift N vouchers directly
+ * to a user by phone number, free of charge. The recipient's claimed_count is updated.
+ */
+export async function ownerTransferVoucher(req: AuthRequest, res: Response): Promise<void> {
+  const id = paramInt(req.params.id);
+  const { recipient_phone, quantity: rawQuantity } = req.body;
+  const quantity = Math.max(1, Math.floor(Number(rawQuantity ?? 1)));
+
+  // Fetch voucher with promotion ownership info
+  const voucher = await prisma.voucher.findUnique({
+    where: { id },
+    include: { business_promotion: { select: { user_id: true } } },
+  });
+  if (!voucher) { res.status(404).json({ error: 'Voucher not found' }); return; }
+  if (voucher.status !== 'active') { res.status(400).json({ error: 'Voucher not active' }); return; }
+
+  // Only the business promotion owner (or admin) may do this
+  const isAdmin = req.user!.roles.includes('admin');
+  const isOwner = voucher.business_promotion?.user_id === req.user!.userId;
+  if (!isOwner && !isAdmin) {
+    res.status(403).json({ error: 'Only the voucher owner can do a direct transfer' });
+    return;
+  }
+
+  // Check expiry
+  const expiry = getVoucherExpiry(voucher);
+  if (expiry && expiry <= new Date()) {
+    res.status(400).json({ error: 'Voucher expired' }); return;
+  }
+
+  // Check capacity
+  if (voucher.max_claims && voucher.claimed_count + quantity > voucher.max_claims) {
+    const remaining = Math.max(0, voucher.max_claims - voucher.claimed_count);
+    res.status(400).json({ error: `Only ${remaining} voucher(s) remaining in the pool` }); return;
+  }
+
+  // Resolve recipient
+  if (!recipient_phone) { res.status(400).json({ error: 'recipient_phone is required' }); return; }
+  const variants = phoneVariants(recipient_phone);
+  const recipient = await prisma.user.findFirst({
+    where: { OR: variants.map((p) => ({ phone: p })) },
+  });
+  if (!recipient) { res.status(404).json({ error: 'Recipient not found. They must be registered on the platform.' }); return; }
+
+  const sender = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+  const normalizedRecipientPhone = normalizePhone(recipient_phone);
+
+  let transfer;
+  try {
+    transfer = await prisma.$transaction(async (tx) => {
+      // Create or increment the recipient's claim
+      const existingClaim = await tx.voucherClaim.findUnique({
+        where: { user_id_voucher_id: { user_id: recipient.id, voucher_id: id } },
+      });
+
+      if (existingClaim) {
+        // Increment quantity on existing claim and reactivate if needed
+        await tx.voucherClaim.update({
+          where: { id: existingClaim.id },
+          data: {
+            quantity: { increment: quantity },
+            status: existingClaim.status === 'transferred' || existingClaim.status === 'expired' ? 'active' : existingClaim.status,
+          },
+        });
+      } else {
+        await tx.voucherClaim.create({
+          data: { voucher_id: id, user_id: recipient.id, status: 'active', quantity },
+        });
+      }
+
+      // Increment the voucher's claimed_count by quantity
+      await tx.voucher.update({
+        where: { id },
+        data: { claimed_count: { increment: quantity } },
+      });
+
+      return tx.voucherTransfer.create({
+        data: {
+          voucher_id: id,
+          sender_id: req.user!.userId,
+          recipient_id: recipient.id,
+          sender_phone: sender!.phone ?? '',
+          recipient_phone: normalizedRecipientPhone,
+          quantity,
+          is_owner_transfer: true,
+        },
+      });
+    });
+  } catch (err: unknown) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      res.status(409).json({ error: 'Concurrent conflict — please retry' });
+      return;
+    }
+    throw err;
+  }
+
+  // Notify recipient
+  try {
+    const recipientUser = await prisma.user.findUnique({ where: { id: recipient.id }, select: { id: true, push_token: true } });
+    if (recipientUser) {
+      const io = getIO();
+      const payload = { type: 'voucher:owner_transferred', transferId: transfer.id, voucherId: id, voucherTitle: voucher.title, quantity, senderName: sender?.name ?? 'Business' };
+      if (io) io.to(`user:${recipientUser.id}`).emit('voucher:owner_transferred', payload);
+      await notify({
+        pushToken: recipientUser.push_token,
+        userId: recipientUser.id,
+        title: 'Vouchers Gifted!',
+        body: `${sender?.name ?? 'A business'} gifted you ${quantity}× "${voucher.title}"`,
+        type: 'voucher_owner_transferred',
+        data: { screen: 'MyVouchers' },
+      });
+    }
+  } catch { /* non-blocking */ }
+
+  res.status(201).json({ ...transfer, quantity });
 }
 
 export async function getMyVouchers(req: AuthRequest, res: Response): Promise<void> {
@@ -483,7 +627,23 @@ export async function getMyVouchers(req: AuthRequest, res: Response): Promise<vo
     },
     orderBy: { claimed_at: 'desc' },
   });
-  res.json(claims.map((c: any) => ({ ...c, voucher: decorateVoucher(c.voucher) })));
+
+  // Detect which voucher_ids were gifted by the business owner to this user
+  const voucherIds = claims.map((c) => c.voucher_id);
+  const ownerGiftedVoucherIds = new Set(
+    voucherIds.length > 0
+      ? (await prisma.voucherTransfer.findMany({
+          where: { recipient_id: req.user!.userId, is_owner_transfer: true, voucher_id: { in: voucherIds } },
+          select: { voucher_id: true },
+        })).map((t) => t.voucher_id)
+      : []
+  );
+
+  res.json(claims.map((c: any) => ({
+    ...c,
+    is_owner_gifted: ownerGiftedVoucherIds.has(c.voucher_id),
+    voucher: decorateVoucher(c.voucher),
+  })));
 }
 
 export async function getMyCreatedVouchers(req: AuthRequest, res: Response): Promise<void> {
@@ -833,34 +993,30 @@ export async function redeemVoucher(req: AuthRequest, res: Response): Promise<vo
     return;
   }
 
+  // How many to redeem in this scan (default 1, max = remaining unredeemed)
+  const redeemQty = Math.max(1, parseOptionalInt(req.body.redeem_quantity) ?? 1);
+
   const voucher = await prisma.voucher.findUnique({
     where: { id: voucherId },
     select: { id: true, status: true, expiry_date: true, expires_at: true },
   });
   if (!voucher) {
-    res.status(404).json({ error: 'Voucher not found' });
-    return;
+    res.status(404).json({ error: 'Voucher not found' }); return;
   }
-
   if (voucher.status !== 'active') {
-    res.status(400).json({ error: 'Voucher not active' });
-    return;
+    res.status(400).json({ error: 'Voucher not active' }); return;
   }
-
   const expiry = getVoucherExpiry(voucher);
   if (expiry && expiry <= new Date()) {
-    res.status(400).json({ error: 'Voucher expired' });
-    return;
+    res.status(400).json({ error: 'Voucher expired' }); return;
   }
 
   const claim = await prisma.voucherClaim.findFirst({
     where: { voucher_id: voucherId, user_id: req.user!.userId },
     orderBy: { claimed_at: 'desc' },
   });
-
   if (!claim) {
-    res.status(404).json({ error: 'Voucher claim not found' });
-    return;
+    res.status(404).json({ error: 'Voucher claim not found' }); return;
   }
 
   if (
@@ -873,52 +1029,54 @@ export async function redeemVoucher(req: AuthRequest, res: Response): Promise<vo
       where: { id: claim.id },
       data: { status: 'expired', installment_status: 'expired' },
     });
-    res.status(409).json({ error: 'Installment deadline missed. Voucher expired.' });
-    return;
+    res.status(409).json({ error: 'Installment deadline missed. Voucher expired.' }); return;
   }
 
-  if (claim.status === 'redeemed' || claim.redeemed_at) {
+  const totalQty = claim.quantity ?? 1;
+  const alreadyRedeemed = claim.redeemed_count ?? 0;
+  const remaining = totalQty - alreadyRedeemed;
+
+  if (claim.status === 'redeemed' || remaining <= 0) {
     res.status(200).json({
       id: claim.id,
       voucher_id: claim.voucher_id,
       claimed_at: claim.claimed_at,
       redeemed_at: claim.redeemed_at,
       status: 'redeemed',
+      quantity: totalQty,
+      redeemed_count: totalQty,
+      remaining_uses: 0,
       idempotent: true,
     });
     return;
   }
 
   if (claim.status !== 'active') {
-    res.status(409).json({ error: 'Only active voucher claims can be redeemed' });
-    return;
+    res.status(409).json({ error: 'Only active voucher claims can be redeemed' }); return;
   }
 
+  const toRedeem = Math.min(redeemQty, remaining);
+  const newRedeemedCount = alreadyRedeemed + toRedeem;
+  const fullyRedeemed = newRedeemedCount >= totalQty;
   const now = new Date();
+
   const updated = await prisma.$transaction(async (tx) => {
-    const updateResult = await tx.voucherClaim.updateMany({
-      where: { id: claim.id, status: 'active', redeemed_at: null },
-      data: { status: 'redeemed', redeemed_at: now },
-    });
-
-    if (updateResult.count === 0) {
-      const existing = await tx.voucherClaim.findUnique({ where: { id: claim.id } });
-      if (!existing) throw new Error('CLAIM_NOT_FOUND');
-      return existing;
-    }
-
-    await tx.voucherRedemption.upsert({
-      where: { voucher_id_used_by_id: { voucher_id: voucherId, used_by_id: req.user!.userId } },
-      update: {},
-      create: {
-        voucher_id: voucherId,
-        used_by_id: req.user!.userId,
-        used_at: now,
+    const next = await tx.voucherClaim.update({
+      where: { id: claim.id },
+      data: {
+        redeemed_count: newRedeemedCount,
+        ...(fullyRedeemed ? { status: 'redeemed', redeemed_at: now } : {}),
       },
     });
 
-    const next = await tx.voucherClaim.findUnique({ where: { id: claim.id } });
-    if (!next) throw new Error('CLAIM_NOT_FOUND');
+    if (fullyRedeemed) {
+      await tx.voucherRedemption.upsert({
+        where: { voucher_id_used_by_id: { voucher_id: voucherId, used_by_id: req.user!.userId } },
+        update: {},
+        create: { voucher_id: voucherId, used_by_id: req.user!.userId, used_at: now },
+      });
+    }
+
     return next;
   });
 
@@ -928,6 +1086,10 @@ export async function redeemVoucher(req: AuthRequest, res: Response): Promise<vo
     claimed_at: updated.claimed_at,
     redeemed_at: updated.redeemed_at,
     status: updated.status,
+    quantity: totalQty,
+    redeemed_count: newRedeemedCount,
+    remaining_uses: totalQty - newRedeemedCount,
+    just_redeemed: toRedeem,
   });
 }
 
@@ -941,23 +1103,23 @@ export async function redeemVoucher(req: AuthRequest, res: Response): Promise<vo
 export async function redeemVoucherByQr(req: AuthRequest, res: Response): Promise<void> {
   const voucherId = parseOptionalInt(req.body.voucher_id);
   const claimId = parseOptionalInt(req.body.claim_id);
+  const redeemQty = Math.max(1, parseOptionalInt(req.body.redeem_quantity) ?? 1);
 
   if (!voucherId || !claimId) {
-    res.status(400).json({ error: 'voucher_id and claim_id are required' });
-    return;
+    res.status(400).json({ error: 'voucher_id and claim_id are required' }); return;
   }
 
-  // Fetch voucher and verify caller is the owner
   const voucher = await prisma.voucher.findUnique({
     where: { id: voucherId },
-    select: { id: true, title: true, status: true, owner_user_id: true, expiry_date: true, expires_at: true },
+    select: { id: true, title: true, status: true, owner_user_id: true, expiry_date: true, expires_at: true, business_promotion: { select: { user_id: true } } },
   });
   if (!voucher) { res.status(404).json({ error: 'Voucher not found' }); return; }
-  if (voucher.owner_user_id !== req.user!.userId) {
+
+  const isOwner = voucher.business_promotion?.user_id === req.user!.userId || req.user!.roles.includes('admin');
+  if (!isOwner) {
     res.status(403).json({ error: 'Only the voucher owner can scan and redeem vouchers' }); return;
   }
 
-  // Fetch the specific claim
   const claim = await prisma.voucherClaim.findUnique({
     where: { id: claimId },
     include: { user: { select: { id: true, name: true, phone: true } } },
@@ -966,13 +1128,24 @@ export async function redeemVoucherByQr(req: AuthRequest, res: Response): Promis
     res.status(404).json({ error: 'QR code not valid for this voucher' }); return;
   }
 
-  // Already redeemed — idempotent success so the scanner shows the right state
-  if (claim.status === 'redeemed' || claim.redeemed_at) {
+  const expiry = getVoucherExpiry(voucher);
+  if (expiry && expiry <= new Date()) {
+    res.status(400).json({ error: 'Voucher has expired' }); return;
+  }
+
+  const totalQty = claim.quantity ?? 1;
+  const alreadyRedeemed = claim.redeemed_count ?? 0;
+  const remaining = totalQty - alreadyRedeemed;
+
+  if (claim.status === 'redeemed' || remaining <= 0) {
     res.status(200).json({
       already_redeemed: true,
       id: claim.id,
       voucher_id: claim.voucher_id,
       redeemed_at: claim.redeemed_at,
+      quantity: totalQty,
+      redeemed_count: totalQty,
+      remaining_uses: 0,
       user: claim.user,
     });
     return;
@@ -982,43 +1155,46 @@ export async function redeemVoucherByQr(req: AuthRequest, res: Response): Promis
     res.status(409).json({ error: `Claim is ${claim.status} — cannot redeem` }); return;
   }
 
-  // Check voucher expiry
-  const expiry = getVoucherExpiry(voucher);
-  if (expiry && expiry <= new Date()) {
-    res.status(400).json({ error: 'Voucher has expired' }); return;
-  }
-
+  const toRedeem = Math.min(redeemQty, remaining);
+  const newRedeemedCount = alreadyRedeemed + toRedeem;
+  const fullyRedeemed = newRedeemedCount >= totalQty;
   const now = new Date();
+
   const updated = await prisma.$transaction(async (tx) => {
-    const result = await tx.voucherClaim.updateMany({
-      where: { id: claimId, status: 'active', redeemed_at: null },
-      data: { status: 'redeemed', redeemed_at: now },
+    const next = await tx.voucherClaim.update({
+      where: { id: claimId },
+      data: {
+        redeemed_count: newRedeemedCount,
+        ...(fullyRedeemed ? { status: 'redeemed', redeemed_at: now } : {}),
+      },
+      include: { user: { select: { id: true, name: true, phone: true } } },
     });
-    if (result.count === 0) {
-      // Race condition — another scan beat us
-      return tx.voucherClaim.findUnique({ where: { id: claimId }, include: { user: { select: { id: true, name: true, phone: true } } } });
+    if (fullyRedeemed) {
+      await tx.voucherRedemption.upsert({
+        where: { voucher_id_used_by_id: { voucher_id: voucherId, used_by_id: claim.user_id } },
+        update: {},
+        create: { voucher_id: voucherId, used_by_id: claim.user_id, used_at: now },
+      });
     }
-    await tx.voucherRedemption.upsert({
-      where: { voucher_id_used_by_id: { voucher_id: voucherId, used_by_id: claim.user_id } },
-      update: {},
-      create: { voucher_id: voucherId, used_by_id: claim.user_id, used_at: now },
-    });
-    return tx.voucherClaim.findUnique({ where: { id: claimId }, include: { user: { select: { id: true, name: true, phone: true } } } });
+    return next;
   });
 
-  const isAlreadyRedeemed = updated?.status === 'redeemed' && updated?.redeemed_at?.getTime() !== now.getTime();
   res.json({
-    already_redeemed: isAlreadyRedeemed ?? false,
-    id: updated!.id,
-    voucher_id: updated!.voucher_id,
-    redeemed_at: updated!.redeemed_at,
-    user: updated!.user,
+    already_redeemed: false,
+    id: updated.id,
+    voucher_id: updated.voucher_id,
+    redeemed_at: updated.redeemed_at,
+    quantity: totalQty,
+    redeemed_count: newRedeemedCount,
+    remaining_uses: totalQty - newRedeemedCount,
+    just_redeemed: toRedeem,
+    user: updated.user,
   });
 }
 
 /**
  * POST /vouchers/:id/payment-intent
- * Creates a Razorpay order for the voucher's discounted price.
+ * Creates a Razorpay order for the voucher's discounted price × quantity.
  * Returns the order details required by the mobile checkout SDK/WebView.
  */
 export async function createVoucherPaymentIntent(req: AuthRequest, res: Response): Promise<void> {
@@ -1026,6 +1202,9 @@ export async function createVoucherPaymentIntent(req: AuthRequest, res: Response
     const id = paramInt(req.params.id);
     // Optional promo code from body — validates against voucher.code
     const { promo_code, payment_mode } = req.body;
+
+    // quantity: how many units of this voucher the user wants to buy (min 1)
+    const quantity = Math.max(1, Math.floor(Number(req.body.quantity ?? 1)));
 
     const voucher = await prisma.voucher.findUnique({ where: { id } });
     if (!voucher) { res.status(404).json({ error: 'Voucher not found' }); return; }
@@ -1036,8 +1215,10 @@ export async function createVoucherPaymentIntent(req: AuthRequest, res: Response
       res.status(400).json({ error: 'Voucher expired' }); return;
     }
 
-    if (voucher.max_claims && voucher.claimed_count >= voucher.max_claims) {
-      res.status(400).json({ error: 'Voucher fully claimed' }); return;
+    // Check that enough units remain
+    if (voucher.max_claims && voucher.claimed_count + quantity > voucher.max_claims) {
+      const remaining = Math.max(0, voucher.max_claims - voucher.claimed_count);
+      res.status(400).json({ error: `Only ${remaining} voucher(s) remaining` }); return;
     }
 
     const existing = await prisma.voucherClaim.findFirst({
@@ -1053,16 +1234,18 @@ export async function createVoucherPaymentIntent(req: AuthRequest, res: Response
     }
 
     const decorated = decorateVoucher(voucher)!;
-    // Use discounted_price if promo applied, otherwise original_price
-    const applicablePrice = promoApplied
+    // Per-unit price (promo applied or not)
+    const pricePerUnit = promoApplied
       ? Number(decorated.discounted_price || 0)
       : Number(decorated.original_price || 0);
 
+    // Total applicable price for all units
+    const applicablePrice = pricePerUnit * quantity;
+
     // For installment vouchers, charge upfront only when payment_mode='upfront'; otherwise charge full applicable price
     const isUpfrontPayment = payment_mode === 'upfront' && voucher.allows_installment && voucher.upfront_amount;
-    const chargeNow = isUpfrontPayment
-      ? Number(voucher.upfront_amount)
-      : applicablePrice;
+    const upfrontPerUnit = isUpfrontPayment ? Number(voucher.upfront_amount) : pricePerUnit;
+    const chargeNow = upfrontPerUnit * quantity;
 
     if (chargeNow <= 0) {
       res.status(400).json({ error: 'Voucher is free \u2014 no payment required' });
@@ -1077,6 +1260,7 @@ export async function createVoucherPaymentIntent(req: AuthRequest, res: Response
       notes: {
         voucher_id: String(id),
         user_id: String(req.user!.userId),
+        quantity: String(quantity),
         kind: voucher.allows_installment ? 'voucher_installment_upfront' : 'voucher_claim',
         promo_applied: String(promoApplied),
         applicable_price: String(applicablePrice),
@@ -1090,12 +1274,14 @@ export async function createVoucherPaymentIntent(req: AuthRequest, res: Response
       currency: 'INR',
       voucher_id: id,
       voucher_title: voucher.title,
+      quantity,
+      price_per_unit: pricePerUnit,
       promo_applied: promoApplied,
       applicable_price: applicablePrice,
       allows_installment: voucher.allows_installment,
-      upfront_amount: voucher.allows_installment ? Number(voucher.upfront_amount) : null,
+      upfront_amount: voucher.allows_installment ? upfrontPerUnit * quantity : null,
       remaining_after_upfront: voucher.allows_installment
-        ? Math.max(0, applicablePrice - Number(voucher.upfront_amount ?? 0))
+        ? Math.max(0, applicablePrice - upfrontPerUnit * quantity)
         : 0,
     });
   } catch (err) {
@@ -1140,8 +1326,13 @@ export async function verifyVoucherPayment(req: AuthRequest, res: Response): Pro
     if (expiry && expiry <= new Date()) {
       res.status(400).json({ error: 'Voucher expired' }); return;
     }
-    if (voucher.max_claims && voucher.claimed_count >= voucher.max_claims) {
-      res.status(400).json({ error: 'Voucher fully claimed' }); return;
+
+    // quantity: how many units were purchased (must match what was ordered)
+    const quantity = Math.max(1, Math.floor(Number(req.body.quantity ?? 1)));
+
+    if (voucher.max_claims && voucher.claimed_count + quantity > voucher.max_claims) {
+      const remaining = Math.max(0, voucher.max_claims - voucher.claimed_count);
+      res.status(400).json({ error: `Only ${remaining} voucher(s) remaining` }); return;
     }
 
     const existing = await prisma.voucherClaim.findFirst({
@@ -1166,17 +1357,19 @@ export async function verifyVoucherPayment(req: AuthRequest, res: Response): Pro
     const voucher2 = decorateVoucher(voucher2Raw);
 
     // Recalculate total price from DB — never trust client-supplied amount
-    const totalPrice = promo_applied
+    const pricePerUnit = promo_applied
       ? Number(voucher2?.discounted_price || voucher2?.original_price || 0)
       : Number(voucher2?.original_price || 0);
+    const totalPrice = pricePerUnit * quantity;
 
     // Use frontend override if provided, otherwise use DB value
     const shouldEnableInstallment = frontendAllowsInstallment !== undefined ? frontendAllowsInstallment : voucher2?.allows_installment;
     const isInstallment = shouldEnableInstallment && voucher2?.upfront_amount;
+    const upfrontTotal = isInstallment ? Number(voucher2!.upfront_amount) * quantity : 0;
     const remainingBalance = isInstallment
-      ? Math.max(0, totalPrice - Number(voucher2!.upfront_amount))
+      ? Math.max(0, totalPrice - upfrontTotal)
       : 0;
-    const paidAmount = isInstallment ? Number(voucher2!.upfront_amount) : totalPrice;
+    const paidAmount = isInstallment ? upfrontTotal : totalPrice;
     const installmentDeadline = isInstallment ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : null;
 
     let claim;
@@ -1187,6 +1380,7 @@ export async function verifyVoucherPayment(req: AuthRequest, res: Response): Pro
             voucher_id: id,
             user_id: req.user!.userId,
             status: 'active',
+            quantity,
             ...(isInstallment ? {
               remaining_balance: remainingBalance,
               paid_amount: paidAmount,
@@ -1197,7 +1391,7 @@ export async function verifyVoucherPayment(req: AuthRequest, res: Response): Pro
         }),
         prisma.voucher.update({
           where: { id },
-          data: { claimed_count: { increment: 1 } },
+          data: { claimed_count: { increment: quantity } },
         }),
       ]);
     } catch (err: unknown) {
@@ -1215,11 +1409,11 @@ export async function verifyVoucherPayment(req: AuthRequest, res: Response): Pro
         const claimer = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { name: true } });
         if (owner) {
           const io = getIO();
-          const payload = { type: 'voucher:claimed', voucherId: id, voucherTitle: voucher.title, claimerName: claimer?.name ?? 'Someone' };
+          const payload = { type: 'voucher:claimed', voucherId: id, voucherTitle: voucher.title, claimerName: claimer?.name ?? 'Someone', quantity };
           if (io) io.to(`user:${owner.id}`).emit('voucher:claimed', payload);
           const ownerBody = isInstallment
-            ? `${claimer?.name ?? 'Someone'} claimed "${voucher.title}" with installment plan. Paid upfront ₹${paidAmount.toLocaleString()}, ₹${remainingBalance.toLocaleString()} remaining (due in 30 days).`
-            : `${claimer?.name ?? 'Someone'} claimed "${voucher.title}" and paid ₹${paidAmount.toLocaleString()}.`;
+            ? `${claimer?.name ?? 'Someone'} claimed ${quantity}× "${voucher.title}" with installment plan. Paid upfront ₹${paidAmount.toLocaleString()}, ₹${remainingBalance.toLocaleString()} remaining (due in 30 days).`
+            : `${claimer?.name ?? 'Someone'} claimed ${quantity}× "${voucher.title}" and paid ₹${paidAmount.toLocaleString()}.`;
           await notify({
             pushToken: owner.push_token,
             userId: owner.id,
@@ -1233,8 +1427,8 @@ export async function verifyVoucherPayment(req: AuthRequest, res: Response): Pro
 
       // Customer confirmation
       const customerBody = isInstallment
-        ? `You claimed "${voucher.title}". Paid ₹${paidAmount.toLocaleString()} now, ₹${remainingBalance.toLocaleString()} due within 30 days.`
-        : `You claimed "${voucher.title}" for ₹${paidAmount.toLocaleString()}.`;
+        ? `You claimed ${quantity}× "${voucher.title}". Paid ₹${paidAmount.toLocaleString()} now, ₹${remainingBalance.toLocaleString()} due within 30 days.`
+        : `You claimed ${quantity}× "${voucher.title}" for ₹${paidAmount.toLocaleString()}.`;
       const customer = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { push_token: true } });
       await notify({
         pushToken: customer?.push_token,
@@ -1251,6 +1445,7 @@ export async function verifyVoucherPayment(req: AuthRequest, res: Response): Pro
       voucher_id: claim.voucher_id,
       claimed_at: claim.claimed_at,
       status: claim.status,
+      quantity,
       payment_id: razorpay_payment_id,
       installment: isInstallment ? {
         remaining_balance: remainingBalance,
