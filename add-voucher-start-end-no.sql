@@ -1,0 +1,2 @@
+ALTER TABLE "Voucher" ADD COLUMN IF NOT EXISTS "voucher_start_no" INTEGER;
+ALTER TABLE "Voucher" ADD COLUMN IF NOT EXISTS "voucher_end_no" INTEGER;

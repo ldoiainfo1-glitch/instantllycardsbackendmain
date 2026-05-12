@@ -141,6 +141,10 @@ export async function createVoucher(req: AuthRequest, res: Response): Promise<vo
     voucher_banner,
     what_we_do,
     website,
+    instagram,
+    marketed_by_instantlly,
+    voucher_start_no,
+    voucher_end_no,
     terms,
     is_popular,
   } = req.body;
@@ -260,6 +264,10 @@ export async function createVoucher(req: AuthRequest, res: Response): Promise<vo
       voucher_banner: voucher_banner || null,
       what_we_do: what_we_do || null,
       website: website || null,
+      instagram: instagram || null,
+      marketed_by_instantlly: marketed_by_instantlly === true || marketed_by_instantlly === 'true',
+      voucher_start_no: voucher_start_no !== undefined && voucher_start_no !== null && voucher_start_no !== '' ? Number(voucher_start_no) : null,
+      voucher_end_no: voucher_end_no !== undefined && voucher_end_no !== null && voucher_end_no !== '' ? Number(voucher_end_no) : null,
       is_published: is_popular === true || is_popular === 'true' ? true : null,
     },
   });
@@ -946,6 +954,16 @@ export async function updateVoucher(req: AuthRequest, res: Response): Promise<vo
   }
   if (b.what_we_do !== undefined) data.what_we_do = b.what_we_do || null;
   if (b.website !== undefined) data.website = b.website || null;
+  if (b.instagram !== undefined) data.instagram = b.instagram || null;
+  if (b.marketed_by_instantlly !== undefined) {
+    data.marketed_by_instantlly = b.marketed_by_instantlly === true || b.marketed_by_instantlly === 'true';
+  }
+  if (b.voucher_start_no !== undefined) {
+    data.voucher_start_no = b.voucher_start_no === null || b.voucher_start_no === '' ? null : Number(b.voucher_start_no);
+  }
+  if (b.voucher_end_no !== undefined) {
+    data.voucher_end_no = b.voucher_end_no === null || b.voucher_end_no === '' ? null : Number(b.voucher_end_no);
+  }
   if (b.status !== undefined) {
     const allowed = ['active', 'inactive', 'draft'];
     if (!allowed.includes(b.status)) { res.status(400).json({ error: `status must be one of: ${allowed.join(', ')}` }); return; }
