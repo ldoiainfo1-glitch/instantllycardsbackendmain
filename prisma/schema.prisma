@@ -346,6 +346,8 @@ model VoucherClaim {
   claimed_at           DateTime             @default(now())
   redeemed_at          DateTime?
   status               String               @default("active")
+  quantity             Int                  @default(1)
+  redeemed_count       Int                  @default(0)
   remaining_balance    Decimal?             @db.Decimal(10, 2)
   paid_amount          Decimal?             @db.Decimal(10, 2)
   installment_deadline DateTime?
@@ -372,17 +374,19 @@ model InstallmentPayment {
 }
 
 model VoucherTransfer {
-  id              Int      @id @default(autoincrement())
-  legacy_id       String?  @unique
-  voucher_id      Int
-  sender_id       Int
-  recipient_id    Int
-  sender_phone    String
-  recipient_phone String
-  transferred_at  DateTime @default(now())
-  recipient       User     @relation("recipient", fields: [recipient_id], references: [id], onDelete: Cascade)
-  sender          User     @relation("sender", fields: [sender_id], references: [id], onDelete: Cascade)
-  voucher         Voucher  @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
+  id                Int      @id @default(autoincrement())
+  legacy_id         String?  @unique
+  voucher_id        Int
+  sender_id         Int
+  recipient_id      Int
+  sender_phone      String
+  recipient_phone   String
+  quantity          Int      @default(1)
+  is_owner_transfer Boolean  @default(false)
+  transferred_at    DateTime @default(now())
+  recipient         User     @relation("recipient", fields: [recipient_id], references: [id], onDelete: Cascade)
+  sender            User     @relation("sender", fields: [sender_id], references: [id], onDelete: Cascade)
+  voucher           Voucher  @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
 }
 
 model Event {

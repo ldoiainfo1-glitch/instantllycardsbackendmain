@@ -9,6 +9,7 @@ import {
   createVoucher,
   claimVoucher,
   transferVoucher,
+  ownerTransferVoucher,
   getMyVouchers,
   getMyCreatedVouchers,
   getMyTransfers,
@@ -107,6 +108,13 @@ router.post(
   [body('voucher_id').isInt(), body('recipient_phone').notEmpty()],
   validate,
   h(transferVoucher)
+);
+router.post(
+  '/:id/owner-transfer',
+  authenticate,
+  [body('recipient_phone').notEmpty(), body('quantity').isInt({ min: 1 })],
+  validate,
+  h(ownerTransferVoucher)
 );
 
 export default router;
