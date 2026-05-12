@@ -276,6 +276,10 @@ model Voucher {
   upfront_amount        Decimal?             @db.Decimal(10, 2)
   what_we_do            String?
   website               String?
+  instagram             String?
+  marketed_by_instantlly Boolean              @default(false)
+  voucher_start_no      Int?
+  voucher_end_no        Int?
   voucher_banner        String?
   max_claims            Int?
   claimed_count         Int                  @default(0)
