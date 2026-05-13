@@ -277,6 +277,9 @@ model Voucher {
   what_we_do            String?
   website               String?
   instagram             String?
+  facebook              String?
+  youtube               String?
+  addresses             String[]             @default([])
   marketed_by_instantlly Boolean              @default(false)
   voucher_start_no      Int?
   voucher_end_no        Int?

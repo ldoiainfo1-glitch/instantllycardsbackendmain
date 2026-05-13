@@ -142,6 +142,9 @@ export async function createVoucher(req: AuthRequest, res: Response): Promise<vo
     what_we_do,
     website,
     instagram,
+    facebook,
+    youtube,
+    addresses,
     marketed_by_instantlly,
     voucher_start_no,
     voucher_end_no,
@@ -265,6 +268,9 @@ export async function createVoucher(req: AuthRequest, res: Response): Promise<vo
       what_we_do: what_we_do || null,
       website: website || null,
       instagram: instagram || null,
+      facebook: facebook || null,
+      youtube: youtube || null,
+      addresses: Array.isArray(addresses) ? addresses.filter(Boolean) : [],
       marketed_by_instantlly: marketed_by_instantlly === true || marketed_by_instantlly === 'true',
       voucher_start_no: voucher_start_no !== undefined && voucher_start_no !== null && voucher_start_no !== '' ? Number(voucher_start_no) : null,
       voucher_end_no: voucher_end_no !== undefined && voucher_end_no !== null && voucher_end_no !== '' ? Number(voucher_end_no) : null,
@@ -360,6 +366,19 @@ export async function transferVoucher(req: AuthRequest, res: Response): Promise<
 
   if (senderClaim.redeemed_at) {
     res.status(409).json({ error: 'Redeemed vouchers cannot be transferred' });
+    return;
+  }
+
+  // Block transfer if the claim has a pending installment (remaining balance owed)
+  if (
+    senderClaim.installment_status === 'active' &&
+    senderClaim.remaining_balance !== null &&
+    Number(senderClaim.remaining_balance) > 0
+  ) {
+    res.status(403).json({
+      error: 'You cannot transfer this voucher while you have an installment due. Please complete your payment first.',
+      code: 'INSTALLMENT_DUE',
+    });
     return;
   }
 
@@ -955,6 +974,9 @@ export async function updateVoucher(req: AuthRequest, res: Response): Promise<vo
   if (b.what_we_do !== undefined) data.what_we_do = b.what_we_do || null;
   if (b.website !== undefined) data.website = b.website || null;
   if (b.instagram !== undefined) data.instagram = b.instagram || null;
+  if (b.facebook !== undefined) data.facebook = b.facebook || null;
+  if (b.youtube !== undefined) data.youtube = b.youtube || null;
+  if (b.addresses !== undefined) data.addresses = Array.isArray(b.addresses) ? b.addresses.filter(Boolean) : [];
   if (b.marketed_by_instantlly !== undefined) {
     data.marketed_by_instantlly = b.marketed_by_instantlly === true || b.marketed_by_instantlly === 'true';
   }

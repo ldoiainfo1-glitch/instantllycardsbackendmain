@@ -3,6 +3,7 @@ import prisma from "../utils/prisma";
 import { AuthRequest } from "../middleware/auth";
 import { paramInt } from "../utils/params";
 import { notify } from "../utils/notify";
+import { phoneVariants } from "../utils/phone";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -125,9 +126,10 @@ export async function addEventStaff(
     return;
   }
 
-  // Find user by phone
+  // Find user by phone — try all common variants (+91XXXXXXXXXX, 0XXXXXXXXXX, 10-digit)
+  const variants = phoneVariants(phone.trim());
   const targetUser = await prisma.user.findFirst({
-    where: { phone: phone.trim() },
+    where: { OR: variants.map((p) => ({ phone: p })) },
     select: { id: true, name: true, phone: true },
   });
   if (!targetUser) {

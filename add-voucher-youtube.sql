@@ -1,0 +1,1 @@
+ALTER TABLE "Voucher" ADD COLUMN IF NOT EXISTS "youtube" TEXT;
